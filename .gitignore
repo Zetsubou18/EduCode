@@ -1,0 +1,7 @@
+out/
+.vs/
+node_modules/
+.runtime/
+*.user
+__pycache__/
+aqtinstall.log
