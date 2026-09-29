@@ -20,6 +20,9 @@ EduCode — настольная Python IDE для Windows и Linux. В осно
 - Русский и английский интерфейс; новые языки добавляются через плагины.
 - Python API для программ и отдельный API расширений. Плагины могут добавлять команды, панели, настройки, действия поиска и языки. Пример Git-плагина находится в [`plugins/git`](plugins/git).
 
+## Сообщить об ошибке
+Нашли ошибку в EduCode? Отправьте описание проблемы, логи и, если возможно, скриншот на: `jobzetsubou@gmail.com`
+
 Документация: [о проекте](docs/ABOUT.md) · [терминал и Python API](docs/TERMINAL_API.md) · [создание плагинов](docs/PLUGINS.md) · [Linux](LINUX.md).
 
 ## Сборка из исходников
@@ -45,6 +48,9 @@ The Windows installer offers Desktop and Start Menu shortcuts. Pinning to the ta
 - Split editing, project search, integrated terminal and browser, and an assistant.
 - Russian and English UI, with additional language packs supplied by plugins.
 - Separate Python APIs for user programs and IDE plugins. Plugins can add commands, panels, settings, search actions, and languages. See the optional [`plugins/git`](plugins/git) example.
+
+## Report a Bug
+Found a bug in EduCode? Send a description of the issue, logs, and, if possible, a screenshot to: `jobzetsubou@gmail.com`
 
 Guides: [About](docs/ABOUT.md) · [Terminal and Python API](docs/TERMINAL_API.md) · [Plugin development](docs/PLUGINS.md) · [Linux](LINUX.md).
 
