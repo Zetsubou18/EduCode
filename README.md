@@ -4,9 +4,17 @@
 
 EduCode — настольная Python IDE для Windows и Linux. В основе — редактор Monaco, диагностика Pyright, терминал, файловый менеджер и необязательные плагины на Python. Интерфейс построен на C++17 и Qt 5.15; программа работает локально.
 
-![EduCode в Windows](assets/screenshots/educode-windows.png)
+## Скриншоты
 
-![EduCode в Linux](assets/screenshots/educode-linux.png)
+| Редактор и консоль | Терминал |
+| --- | --- |
+| ![Редактор и консоль EduCode](assets/screenshots/educode-editor.png) | ![Встроенный терминал EduCode](assets/screenshots/educode-terminal.png) |
+
+| Менеджер библиотек | Настройки |
+| --- | --- |
+| ![Менеджер библиотек EduCode](assets/screenshots/educode-packages.png) | ![Настройки EduCode](assets/screenshots/educode-settings.png) |
+
+![Встроенный браузер EduCode](assets/screenshots/educode-browser.png)
 
 Подробности обновления: [EduCode 0.3.0](docs/RELEASE_NOTES_0.3.0.md).
 
