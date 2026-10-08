@@ -4,30 +4,53 @@
 #include <QJsonObject>
 #include <QProcessEnvironment>
 #include <QFileInfo>
+#include <QRegularExpression>
+#include <algorithm>
+
+namespace {
+QString normalizedPackageName(QString name) {
+    name = name.toLower();
+    name.replace(QRegularExpression("[-_.]+"), "-");
+    return name;
+}
+}
 PackageManager::PackageManager(QObject *parent) : QObject(parent) {
     auto environment = QProcessEnvironment::systemEnvironment();
     environment.insert("PYTHONIOENCODING", "utf-8");
     environment.insert("PYTHONUTF8", "1");
     process.setProcessEnvironment(environment);
     connect(&process, &QProcess::stateChanged, this, [this] { emit changed(); });
+    connect(&process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError kind) {
+        if (kind != QProcess::FailedToStart) return;
+        currentStatus = "Ошибка запуска";
+        emit error("Не удалось запустить менеджер пакетов: " + process.errorString());
+        emit changed();
+    });
     searchTimer.setSingleShot(true);
-    searchTimer.setInterval(350);
+    searchTimer.setInterval(300);
     connect(&searchTimer, &QTimer::timeout, this, [this] { start("search", pendingQuery); });
     connect(
         &process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
         [this](int code, QProcess::ExitStatus) {
+            const auto finishedOperation = operation;
+            const auto finishedArgument = operationArgument;
             const auto raw = process.readAllStandardOutput();
             const auto doc = QJsonDocument::fromJson(raw.trimmed());
             const auto errorText = doc.isObject() ? doc.object()["error"].toString() : QString();
+            if (finishedOperation == "search" &&
+                normalizedPackageName(finishedArgument) != normalizedPackageName(pendingQuery)) {
+                continuePendingSearch();
+                return;
+            }
             if (code != 0 || !errorText.isEmpty()) {
                 currentStatus = "Ошибка";
                 emit error(errorText.isEmpty() ? QString::fromUtf8(process.readAllStandardError()).trimmed()
                                                : errorText);
-            } else if (operation == "list") {
+            } else if (finishedOperation == "list") {
                 installed = doc.array().toVariantList();
                 packageItems = installed;
                 currentStatus = "Установлено: " + QString::number(installed.size());
-            } else if (operation == "search") {
+            } else if (finishedOperation == "search") {
                 packageItems.clear();
                 for (const auto &present : installed)
                     if (present.toMap()["name"].toString().contains(pendingQuery, Qt::CaseInsensitive))
@@ -42,8 +65,21 @@ PackageManager::PackageManager(QObject *parent) : QObject(parent) {
                     if (!found)
                         packageItems.append(candidate);
                 }
+                std::stable_sort(packageItems.begin(), packageItems.end(), [this](const QVariant &left, const QVariant &right) {
+                    const auto needle = normalizedPackageName(pendingQuery);
+                    const auto a = normalizedPackageName(left.toMap()["name"].toString());
+                    const auto b = normalizedPackageName(right.toMap()["name"].toString());
+                    const auto rank = [&needle](const QString &name) {
+                        if (name == needle) return 0;
+                        if (name.startsWith(needle)) return 1;
+                        return 2;
+                    };
+                    if (rank(a) != rank(b)) return rank(a) < rank(b);
+                    if (a.size() != b.size()) return a.size() < b.size();
+                    return a < b;
+                });
                 currentStatus = packageItems.isEmpty() ? "Ничего не найдено" : "Результаты поиска";
-            } else if (operation == "info") {
+            } else if (finishedOperation == "info") {
                 packageDetails = doc.object().toVariantMap();
                 currentStatus = packageDetails.isEmpty() ? "Ответ PyPI не распознан" : "Информация с PyPI";
             } else {
@@ -52,8 +88,8 @@ PackageManager::PackageManager(QObject *parent) : QObject(parent) {
                 QTimer::singleShot(0, this, &PackageManager::refresh);
             }
             emit changed();
-            if (operation == "list" && !pendingQuery.isEmpty())
-                QTimer::singleShot(0, this, [this] { start("search", pendingQuery); });
+            if (finishedOperation == "list" && !pendingQuery.isEmpty())
+                QTimer::singleShot(0, this, &PackageManager::continuePendingSearch);
         });
 }
 PackageManager::~PackageManager() {
@@ -76,6 +112,7 @@ void PackageManager::start(const QString &action, const QString &argument) {
     if (busy() || python.isEmpty())
         return;
     operation = action;
+    operationArgument = argument;
     currentStatus = action == "list"     ? "Читаю окружение…"
                     : action == "search" ? "Ищу на PyPI…"
                                          : "Выполняю операцию…";
@@ -84,11 +121,6 @@ void PackageManager::start(const QString &action, const QString &argument) {
     if (!argument.isEmpty())
         args << argument;
     process.start(python, args);
-    if (!process.waitForStarted(3000)) {
-        currentStatus = "Ошибка запуска";
-        emit error("Не удалось запустить менеджер пакетов: " + process.errorString());
-        emit changed();
-    }
     emit changed();
 }
 void PackageManager::refresh() {
@@ -104,13 +136,18 @@ void PackageManager::search(const QString &q) {
     } else
         searchTimer.start();
 }
+void PackageManager::continuePendingSearch() {
+    if (!pendingQuery.isEmpty())
+        start("search", pendingQuery);
+}
 void PackageManager::select(const QString &name) {
     selected = name;
     packageDetails.clear();
     start("info", name);
 }
-void PackageManager::install(const QString &name) {
-    start("install", name);
+void PackageManager::install(const QString &name, const QString &version) {
+    const auto target = version.trimmed().isEmpty() ? name : name + "==" + version.trimmed();
+    start("install", target);
 }
 void PackageManager::installRequirements(const QString &path) {
     if (QFileInfo(path).fileName() == "requirements.txt" && QFileInfo(path).isFile())

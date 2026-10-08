@@ -15,6 +15,7 @@ class SearchService : public QObject {
     ~SearchService() override;
     void setProject(const QString &root, const QString &python);
     void refresh();
+    void refreshLibraries();
     void query(const QString &text);
     void updateDocument(const QString &path, const QString &text);
     void forgetDocument(const QString &path);
@@ -23,6 +24,10 @@ class SearchService : public QObject {
   signals:
     void changed();
     void indexChanged();
+    void scanStarted();
+    void scanFinished(int files);
+    void libraryIndexStarted();
+    void libraryIndexFinished(int entries, bool ok);
 
   private:
     QString root, expression, interpreter, scannedRoot;

@@ -38,6 +38,7 @@ class TeacherSession : public QObject {
     Q_PROPERTY(QString remoteText MEMBER remoteText NOTIFY remoteChanged)
     Q_PROPERTY(QString frame MEMBER frame NOTIFY frameChanged)
     Q_PROPERTY(QString selected MEMBER selected NOTIFY remoteChanged)
+    Q_PROPERTY(bool canReconnect READ canReconnect NOTIFY changed)
   public:
     explicit TeacherSession(QObject *parent = nullptr);
     std::function<QJsonObject()> document;
@@ -46,6 +47,7 @@ class TeacherSession : public QObject {
     std::function<QString()> capture;
     Q_INVOKABLE void create();
     Q_INVOKABLE void join(const QString &ip, int port);
+    Q_INVOKABLE void reconnect();
     Q_INVOKABLE void stop();
     Q_INVOKABLE void kick(const QString &id);
     Q_INVOKABLE void watch(const QString &id);
@@ -54,11 +56,13 @@ class TeacherSession : public QObject {
     QObject *roster() {
         return &rosterModel;
     }
+    bool canReconnect() const { return role == "idle" && !lastHost.isEmpty() && lastPort > 0; }
   signals:
     void changed();
     void remoteChanged();
     void frameChanged();
     void uiCommand(const QString &name);
+    void connectionLost(const QString &reason);
 
   private:
     struct Peer {
@@ -74,6 +78,9 @@ class TeacherSession : public QObject {
     TeacherStudentsModel rosterModel{this};
     QTimer timer;
     QString role = "idle", status, selected, remotePath, remoteText, frame, lastFrame;
+    QString lastHost;
+    bool manualStop = false;
+    int lastPort = 0;
     int port = 0, revision = 0, remoteRevision = 0;
     QJsonObject last;
     void attach(QTcpSocket *socket);

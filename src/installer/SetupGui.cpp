@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFutureWatcher>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -15,11 +16,16 @@
 #include <QStandardPaths>
 #include <QVBoxLayout>
 #include <QWidget>
+#include <QtConcurrent>
 #include <windows.h>
 #include <shlobj.h>
 #include <shobjidl.h>
 
 namespace {
+struct OperationResult {
+    bool okay = false;
+    QString error;
+};
 QString defaultPath() {
     return QDir(qEnvironmentVariable("LOCALAPPDATA")).filePath("Programs/EduCode");
 }
@@ -53,7 +59,7 @@ void registerApp(const QString &folder, const QString &launcher) {
         const auto data = reinterpret_cast<const BYTE *>(value.utf16());
         RegSetValueExW(key, field, 0, REG_SZ, data, DWORD((value.size() + 1) * sizeof(wchar_t)));
     };
-    write(L"DisplayName", "EduCode"); write(L"DisplayVersion", "0.2.0");
+    write(L"DisplayName", "EduCode"); write(L"DisplayVersion", "0.3.0");
     write(L"Publisher", "Zetsubou"); write(L"InstallLocation", folder);
     write(L"DisplayIcon", QDir(folder).filePath("EduCode.exe"));
     write(L"UninstallString", QString("\"%1\" --uninstall \"%2\"").arg(launcher, folder));
@@ -155,12 +161,32 @@ int main(int argc, char **argv) {
         if (!value.isEmpty()) path->setText(QDir(value).filePath("EduCode"));
     });
     QObject::connect(action, &QPushButton::clicked, [&] {
-        action->setEnabled(false); progress->show(); status->setText("Подождите…"); app.processEvents();
-        const bool okay = removing ? uninstall(path->text(), &error)
-            : install(bundle, path->text(), launcher, desktop->isChecked(), startMenu->isChecked(), &error);
-        progress->hide(); action->setEnabled(true);
-        if (okay) { QMessageBox::information(&window, "EduCode", removing ? "EduCode удалён." : "EduCode установлен."); app.quit(); }
-        else { status->setText(error); QMessageBox::warning(&window, "EduCode", error); }
+        const auto targetPath = path->text();
+        const auto createDesktop = desktop->isChecked();
+        const auto createStartMenu = startMenu->isChecked();
+        action->setEnabled(false); browse->setEnabled(false); path->setEnabled(false);
+        desktop->setEnabled(false); startMenu->setEnabled(false);
+        progress->show(); status->setText(removing ? "Удаление файлов…" : "Распаковка и установка файлов…");
+        auto *watcher = new QFutureWatcher<OperationResult>(&window);
+        QObject::connect(watcher, &QFutureWatcher<OperationResult>::finished, &window, [&, watcher] {
+            const auto result = watcher->result();
+            watcher->deleteLater();
+            progress->hide(); action->setEnabled(true); browse->setEnabled(true); path->setEnabled(true);
+            desktop->setEnabled(true); startMenu->setEnabled(true);
+            if (result.okay) {
+                QMessageBox::information(&window, "EduCode", removing ? "EduCode удалён." : "EduCode установлен.");
+                app.quit();
+            } else {
+                status->setText(result.error);
+                QMessageBox::warning(&window, "EduCode", result.error);
+            }
+        });
+        watcher->setFuture(QtConcurrent::run([=] {
+            OperationResult result;
+            result.okay = removing ? uninstall(targetPath, &result.error)
+                                     : install(bundle, targetPath, launcher, createDesktop, createStartMenu, &result.error);
+            return result;
+        }));
     });
     window.show();
     return app.exec();

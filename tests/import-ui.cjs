@@ -12,7 +12,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));let ws;const pending=new Map();
 async function evaluate(expression){return new Promise((resolve,reject)=>{const id=++seq;pending.set(id,{resolve,reject});ws.send(JSON.stringify({id,method:'Runtime.evaluate',params:{expression,returnByValue:true,awaitPromise:true}}));setTimeout(()=>{if(pending.delete(id))reject(Error('CDP timeout'));},12000).unref();});}
 async function wait(expression){for(let i=0;i<120;i++){if(await evaluate(expression))return;await sleep(200);}throw Error('Timeout: '+expression);}
 (async()=>{let page;for(let i=0;i<100;i++){try{page=(await(await fetch('http://127.0.0.1:9243/json/list')).json()).find(p=>p.url.includes('editor.html'));if(page)break;}catch{}await sleep(200);}assert(page,'editor unavailable');
- const Socket=global.WebSocket||require('ws');ws=new Socket(page.webSocketDebuggerUrl);await new Promise((resolve,reject)=>{ws.onopen=resolve;ws.onerror=reject;});
+ const Socket=global.WebSocket||require('undici').WebSocket;ws=new Socket(page.webSocketDebuggerUrl);await new Promise((resolve,reject)=>{ws.onopen=resolve;ws.onerror=reject;});
  ws.onmessage=e=>{const m=JSON.parse(e.data);const p=pending.get(m.id);if(!p)return;pending.delete(m.id);m.error||m.result.exceptionDetails?p.reject(Error(JSON.stringify(m))):p.resolve(m.result.result.value);};
  await wait('typeof host!=="undefined"&&host&&serverReady&&activePath.endsWith("main.py")');
  assert.deepEqual(await evaluate('editor.getPosition()'),{lineNumber:2,column:3});console.log('PASS CLI line/column');
@@ -29,9 +29,9 @@ async function wait(expression){for(let i=0;i<120;i++){if(await evaluate(express
  assert(fs.readFileSync(moduleFile,'utf8').includes('def hello'));console.log('PASS save imported module');
  const configPath=await evaluate('host.configPath');
  const marker=path.join(path.dirname(configPath),'ai-quota/offline-retry.marker');if(fs.existsSync(marker))fs.unlinkSync(marker);
- await evaluate('host.setSetting("ai.provider","groq");host.setSetting("ai.groqApiKey","offline-test-key");host.setSetting("ai.groqModel","offline-test-model");host.ai.createChat();host.ai.send("offline retry test");true');
- await sleep(500);await wait('!host.ai.busy&&host.ai.messages.length===1');
+  await evaluate('(async()=>{await host.setSetting("ai.provider","gemini");await host.setSetting("ai.geminiApiKey","offline-test-key");await host.setSetting("ai.geminiModel","offline-test-model");for(const id of host.ai.chats.map(c=>c.id))await host.ai.deleteChat(id);await host.ai.send("offline retry test");return true;})()');
+  await sleep(500);await wait('!host.ai.busy&&host.ai.messages.length===1');
  await evaluate('host.ai.retry();true');await wait('!host.ai.busy&&host.ai.messages.length===2');
  assert.equal(await evaluate('host.ai.messages[1].content'),'OFFLINE_RETRY_OK');
- await evaluate('host.setSetting("ai.groqApiKey","");host.setSetting("ai.provider","ollama");true');console.log('PASS failed AI request retry without duplicated prompt (zero API calls)');
+ await evaluate('host.setSetting("ai.geminiApiKey","");host.setSetting("ai.provider","ollama");true');console.log('PASS failed AI request retry without duplicated prompt (zero API calls)');
 })().then(()=>{ws.close();app.kill();}).catch(e=>{console.error(e);if(ws)ws.close();app.kill();process.exitCode=1;});

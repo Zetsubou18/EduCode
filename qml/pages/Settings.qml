@@ -15,7 +15,7 @@ Rectangle {
   {id:"browser",name:backend.translate("Браузер",cfg["general.language"]),keywords:"google сайт начальная страница"},
   {id:"python",name:"Python",keywords:"интерпретатор окружение пути"},
   {id:"notifications",name:backend.translate("Уведомления",cfg["general.language"]),keywords:"сообщение система тест"},
-  {id:"ai",name:backend.translate("ИИ · Лира",cfg["general.language"]),keywords:"ollama groq api модель агент память контекст"},
+  {id:"ai",name:backend.translate("ИИ · Лира",cfg["general.language"]),keywords:"ollama gemini api модель агент память контекст"},
   {id:"plugins",name:backend.translate("Плагины",cfg["general.language"]),keywords:"python расширения установка"},
   {id:"hotkeys",name:backend.translate("Горячие клавиши",cfg["general.language"]),keywords:"комбинации палитра команды f1"},
   {id:"about",name:backend.translate("О программе",cfg["general.language"]),keywords:"educode zetsubou версия"}
@@ -62,14 +62,12 @@ Rectangle {
       C.Select { Layout.preferredWidth: 250; model: ["Русский", "English"].concat(backend.plugins.reduce(function(a,p){return a.concat(Object.keys(p.translations||{}));},[])); currentIndex: Math.max(0,["ru","en"].concat(backend.plugins.reduce(function(a,p){return a.concat(Object.keys(p.translations||{}));},[])).indexOf(cfg["general.language"])); onActivated: backend.setSetting("general.language",["ru","en"].concat(backend.plugins.reduce(function(a,p){return a.concat(Object.keys(p.translations||{}));},[]))[index]) }
       C.Input { Layout.fillWidth: true; text: cfg["general.displayName"]; placeholderText: backend.translate("Ваше имя",backend.configuration["general.language"]); maximumLength: 80; onEditingFinished: backend.setSetting("general.displayName",text.trim()) }
       C.Toggle { text: backend.translate("Сохранять файлы перед запуском",backend.configuration["general.language"]); checked: cfg["general.saveBeforeRun"]; onClicked: backend.setSetting("general.saveBeforeRun",checked) }
+      C.Toggle { text: backend.translate("Присылать уведомления об обновлениях",backend.configuration["general.language"]); checked: cfg["updates.enabled"]; onClicked: backend.setSetting("updates.enabled",checked) }
       Text { text: backend.translate("Папка для новых проектов",backend.configuration["general.language"]); color: C.Theme.muted; font.pixelSize: 13 }
       C.Input { Layout.fillWidth: true; text: cfg["general.projectsDirectory"]; onEditingFinished: {if(text.trim()!=="")backend.setSetting("general.projectsDirectory",text.trim());} }
       Text { text: backend.translate("Конфигурация JSON",backend.configuration["general.language"]); color: C.Theme.muted; font.pixelSize: 13 }
       Text { text: backend.configPath; color: C.Theme.faint; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.Wrap }
       C.ActionButton { text: backend.translate("Открыть конфигурацию",backend.configuration["general.language"]); glyph: "file"; enabled: backend.projectPath!==""; onClicked: {backend.back();backend.openFile(backend.configPath);} }
-      Text { visible: Qt.platform.os!=="linux"; text: backend.translate("Прокси для ИИ и браузера",backend.configuration["general.language"]); color: C.Theme.muted; font.pixelSize: 13 }
-      C.Input { visible: Qt.platform.os!=="linux"; Layout.fillWidth: true; text: cfg["network.proxy"]; placeholderText: backend.translate("socks5://host:port или http://host:port",backend.configuration["general.language"]); onEditingFinished: backend.setSetting("network.proxy",text.trim()) }
-      Text { visible: Qt.platform.os!=="linux"; text: backend.translate("Пустое поле — без явного прокси. Браузер применяет изменение после перезапуска IDE.",backend.configuration["general.language"]); color: C.Theme.faint; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.Wrap }
       Text { text: backend.translate("Журнал IDE",backend.configuration["general.language"]); color: C.Theme.muted; font.pixelSize: 13 }
       Text { text: backend.logPath; color: C.Theme.faint; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.Wrap }
       C.ActionButton { text: backend.translate("Показать папку журнала",backend.configuration["general.language"]); glyph: "folder"; onClicked: backend.fileOperation("reveal",backend.logPath) }
@@ -127,51 +125,40 @@ Rectangle {
       visible: settingsPage.selected==="ai"; spacing: 14; Layout.fillWidth: true
       C.Toggle { text: backend.translate("Включить Лиру",backend.configuration["general.language"]); checked: cfg["ai.enabled"]; onClicked: backend.setSetting("ai.enabled",checked) }
       C.Toggle { text: backend.translate("Показывать «Спросить Лиру» при ошибках",backend.configuration["general.language"]); checked: cfg["ai.askButtons"]; onClicked: backend.setSetting("ai.askButtons",checked) }
-      C.Select { Layout.preferredWidth: 300; model: ["Ollama", "Groq"]; currentIndex: cfg["ai.provider"]==="groq" ? 1 : 0; onActivated: backend.setSetting("ai.provider",index===1 ? "groq" : "ollama") }
-      ColumnLayout { visible: cfg["ai.provider"]==="groq"; Layout.fillWidth: true; spacing: 12
-       Text { text: backend.translate("API-ключ Groq",backend.configuration["general.language"]); color: C.Theme.muted }
-       C.Input { Layout.fillWidth: true; echoMode: TextInput.Password; text: cfg["ai.groqApiKey"]; onEditingFinished: backend.setSetting("ai.groqApiKey",text.trim()) }
-       Text { text: backend.translate("Модель Groq · ID из консоли",backend.configuration["general.language"]); color: C.Theme.muted }
-       C.Input { Layout.fillWidth: true; text: cfg["ai.groqModel"]; placeholderText: "openai/gpt-oss-20b"; onEditingFinished: backend.setSetting("ai.groqModel",text.trim()) }
-       Text { text: backend.translate("Ключ хранится в локальной конфигурации. Код и контекст отправляются в Groq.",backend.configuration["general.language"]); color: C.Theme.faint; Layout.fillWidth: true; wrapMode: Text.Wrap }
-       RowLayout {
-        Text { text: backend.translate("Запросов/мин",backend.configuration["general.language"]); color: C.Theme.muted }
-        C.NumberInput { from:1;to:1000;value:cfg["ai.groqRPM"];onValueModified:backend.setSetting("ai.groqRPM",value) }
-        Text { text: backend.translate("Запросов/сутки",backend.configuration["general.language"]); color: C.Theme.muted }
-        C.NumberInput { from:1;to:100000;value:cfg["ai.groqRPD"];onValueModified:backend.setSetting("ai.groqRPD",value) }
+       C.Select { Layout.preferredWidth: 300; model: ["Ollama", "Gemini"]; currentIndex: cfg["ai.provider"]==="gemini" ? 1 : 0; onActivated: backend.setSetting("ai.provider",index===1 ? "gemini" : "ollama") }
+       ColumnLayout { visible: cfg["ai.provider"]==="gemini"; Layout.fillWidth: true; spacing: 12
+        Text { text: backend.translate("API-ключ Gemini",backend.configuration["general.language"]); color: C.Theme.muted }
+        C.Input { Layout.fillWidth: true; echoMode: TextInput.Password; text: cfg["ai.geminiApiKey"]; onEditingFinished: backend.setSetting("ai.geminiApiKey",text.trim()) }
+        Text { text: backend.translate("Модель Gemini",backend.configuration["general.language"]); color: C.Theme.muted }
+        C.Input { Layout.fillWidth: true; text: cfg["ai.geminiModel"]; placeholderText: "gemini-3.1-flash-lite"; onEditingFinished: backend.setSetting("ai.geminiModel",text.trim()) }
+        Text { text: backend.translate("Ключ хранится в локальной конфигурации. Код и контекст отправляются в Google Gemini.",backend.configuration["general.language"]); color: C.Theme.faint; Layout.fillWidth: true; wrapMode: Text.Wrap }
+        RowLayout {
+         Text { text: backend.translate("Максимум токенов ответа",backend.configuration["general.language"]); color: C.Theme.muted }
+         C.NumberInput { from:128;to:65536;stepSize:128;value:cfg["ai.geminiOutputTokens"];onValueModified:backend.setSetting("ai.geminiOutputTokens",value) }
+        }
+        C.ActionButton { text: backend.translate("Получить ключ в Google AI Studio",backend.configuration["general.language"]); onClicked: Qt.openUrlExternally("https://aistudio.google.com/apikey") }
        }
-       RowLayout {
-        Text { text: backend.translate("Токенов/мин",backend.configuration["general.language"]); color: C.Theme.muted }
-        C.NumberInput { from:1024;to:1000000;stepSize:1024;value:cfg["ai.groqTPM"];onValueModified:backend.setSetting("ai.groqTPM",value) }
-        Text { text: backend.translate("Токенов/сутки",backend.configuration["general.language"]); color: C.Theme.muted }
-        C.NumberInput { from:1024;to:10000000;stepSize:1000;value:cfg["ai.groqTPD"];onValueModified:backend.setSetting("ai.groqTPD",value) }
-       }
-       Text { text: backend.translate("Паузы и счётчик сохраняются между чатами и запусками. Укажите лимиты своей модели; расход других клиентов учитывается по ответам Groq.",backend.configuration["general.language"]); color:C.Theme.faint; Layout.fillWidth:true; wrapMode:Text.Wrap }
-       C.ActionButton { text: backend.translate("Модели и лимиты Groq",backend.configuration["general.language"]); onClicked: Qt.openUrlExternally("https://console.groq.com/docs/rate-limits") }
-      }
-      Text { visible: cfg["ai.provider"]!=="groq"; text: backend.translate("Сервер Ollama",backend.configuration["general.language"]); color: C.Theme.muted; font.pixelSize: 13 }
-      RowLayout { visible: cfg["ai.provider"]!=="groq"; Layout.fillWidth: true
+       Text { visible: cfg["ai.provider"]==="ollama"; text: backend.translate("Сервер Ollama",backend.configuration["general.language"]); color: C.Theme.muted; font.pixelSize: 13 }
+       RowLayout { visible: cfg["ai.provider"]==="ollama"; Layout.fillWidth: true
        C.Input { Layout.fillWidth: true; text: cfg["ai.url"]; onEditingFinished: backend.setSetting("ai.url",text.trim()) }
        C.ActionButton { text: backend.translate("Проверить",backend.configuration["general.language"]); onClicked: backend.ai.probe() }
       }
-      RowLayout { visible: cfg["ai.provider"]!=="groq"; Layout.fillWidth: true
+       RowLayout { visible: cfg["ai.provider"]==="ollama"; Layout.fillWidth: true
        Text { text: backend.ai.ollamaAvailable ? "Ollama подключена" : "Ollama не найдена"; color: backend.ai.ollamaAvailable ? C.Theme.green : C.Theme.error; font.pixelSize: 12; Layout.fillWidth: true }
        C.ActionButton { visible: !backend.ai.ollamaAvailable; text: backend.translate("Скачать Ollama",backend.configuration["general.language"]); onClicked: backend.installOllama() }
       }
       Text { text: backend.translate("Модель",backend.configuration["general.language"]); color: C.Theme.muted; font.pixelSize: 13 }
-      C.Select { visible: cfg["ai.provider"]!=="groq"; Layout.preferredWidth: 360; model: [{name:"Не выбрана"}].concat(backend.ai.models); textRole: "name"; currentIndex: {for(var i=1;i<model.length;i++)if(model[i].name===cfg["ai.model"])return i;return 0;} onActivated: backend.setSetting("ai.model",index===0 ? "" : model[index].name) }
-      Text { visible: cfg["ai.provider"]!=="groq"; text: backend.translate("Модель не выбирается автоматически. Сначала загрузите её командой ollama pull <имя>.",backend.configuration["general.language"]); color: C.Theme.faint; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.Wrap }
+       C.Select { visible: cfg["ai.provider"]==="ollama"; Layout.preferredWidth: 360; model: [{name:"Не выбрана"}].concat(backend.ai.models); textRole: "name"; currentIndex: {for(var i=1;i<model.length;i++)if(model[i].name===cfg["ai.model"])return i;return 0;} onActivated: backend.setSetting("ai.model",index===0 ? "" : model[index].name) }
+       Text { visible: cfg["ai.provider"]==="ollama"; text: backend.translate("Модель не выбирается автоматически. Сначала загрузите её командой ollama pull <имя>.",backend.configuration["general.language"]); color: C.Theme.faint; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.Wrap }
       Text { text: backend.translate("Что Лире важно знать о вас",backend.configuration["general.language"]); color: C.Theme.muted; font.pixelSize: 13; Layout.topMargin: 8 }
       TextArea { Layout.fillWidth: true; Layout.preferredHeight: 90; text: cfg["ai.userPrompt"]; placeholderText: backend.translate("Например: я только начинаю изучать Python; объясняй простыми словами",backend.configuration["general.language"]); color: C.Theme.text; placeholderTextColor: C.Theme.faint; wrapMode: TextEdit.Wrap; selectByMouse: true; background: Rectangle { color:C.Theme.editor;border.color:C.Theme.border;radius:5 } onActiveFocusChanged: if(!activeFocus)backend.setSetting("ai.userPrompt",text) }
-      Text { text: backend.translate("Глобальная память о пользователе · JSON",backend.configuration["general.language"]); color: C.Theme.muted; font.pixelSize: 13 }
-      TextArea { id: userMemory; Layout.fillWidth: true; Layout.preferredHeight: 100; text: JSON.stringify(cfg["ai.userMemory"],null,2); color:C.Theme.text; font.family:"Consolas"; font.pixelSize:11; selectByMouse:true; background:Rectangle{color:C.Theme.editor;border.color:C.Theme.border;radius:5} onActiveFocusChanged: if(!activeFocus){try{backend.setSetting("ai.userMemory",JSON.parse(text));}catch(e){text=JSON.stringify(cfg["ai.userMemory"],null,2);}} }
       Text { text: backend.translate("Рабочие факты Лиры · JSON",backend.configuration["general.language"]); color: C.Theme.muted; font.pixelSize: 13 }
       TextArea { id: factMemory; Layout.fillWidth: true; Layout.preferredHeight: 100; text: JSON.stringify(cfg["ai.factMemory"],null,2); color:C.Theme.text; font.family:"Consolas"; font.pixelSize:11; selectByMouse:true; background:Rectangle{color:C.Theme.editor;border.color:C.Theme.border;radius:5} onActiveFocusChanged: if(!activeFocus){try{backend.setSetting("ai.factMemory",JSON.parse(text));}catch(e){text=JSON.stringify(cfg["ai.factMemory"],null,2);}} }
       RowLayout {
        ColumnLayout { Text{text: backend.translate("Лимит памяти чата · символы",backend.configuration["general.language"]);color:C.Theme.muted;font.pixelSize:12} C.NumberInput{from:4000;to:100000;stepSize:1000;value:cfg["ai.chatMemoryLimit"];onValueModified:backend.setSetting("ai.chatMemoryLimit",value)} }
        ColumnLayout { Text{text: backend.translate("Контекст модели · токены",backend.configuration["general.language"]);color:C.Theme.muted;font.pixelSize:12} C.NumberInput{from:2048;to:131072;stepSize:1024;value:cfg["ai.contextSize"];onValueModified:backend.setSetting("ai.contextSize",value)} }
       }
-      Text { text: backend.translate("После лимита старая часть конкретного чата сжимается. Память пользователя и рабочие факты хранятся отдельно и видны здесь.",backend.configuration["general.language"]); color:C.Theme.faint;font.pixelSize:11;Layout.fillWidth:true;wrapMode:Text.Wrap }
+      Text { text: backend.translate("После лимита старая часть конкретного чата сжимается. Рабочие факты Лиры хранятся отдельно и видны здесь.",backend.configuration["general.language"]); color:C.Theme.faint;font.pixelSize:11;Layout.fillWidth:true;wrapMode:Text.Wrap }
      }
      ColumnLayout {
       visible: settingsPage.selected==="hotkeys"; spacing: 8; Layout.fillWidth: true

@@ -40,7 +40,7 @@ Priority: optional
 Architecture: $arch
 Maintainer: Zetsubou <zetsubou@users.noreply.github.com>
 Installed-Size: $size
-Depends: nodejs, python3 (>= 3.10), python3-venv, libqt5webenginecore5, qml-module-qtwebengine, qml-module-qtwebchannel, qml-module-qtquick-controls2, qml-module-qtquick-layouts, qml-module-qtquick-dialogs, qml-module-qtquick2, qml-module-qtgraphicaleffects
+Depends: nodejs, python3 (>= 3.10), python3-venv, libqt5webenginecore5, qml-module-qtwebengine, qml-module-qtwebchannel, qml-module-qtquick-controls, qml-module-qtquick-controls2, qml-module-qtquick-layouts, qml-module-qtquick-dialogs, qml-module-qtquick2, qml-module-qtgraphicaleffects
 Homepage: https://github.com/Zetsubou18/EduCode
 Description: EduCode Python IDE
  Desktop Python IDE with Monaco editor, Pyright diagnostics,

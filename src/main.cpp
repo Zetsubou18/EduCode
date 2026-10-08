@@ -22,8 +22,7 @@
 #include <QtWebEngine/QtWebEngine>
 int main(int argc, char **argv) {
     QStringList paths;
-    bool options = true, stdinDocument = false, showLogs = false, showConfig = false, proxySpecified = false;
-    QString proxy;
+    bool options = true, stdinDocument = false, showLogs = false, showConfig = false;
     int startLine = 0, startColumn = 0;
     for (int i = 1; i < argc; ++i) {
         const auto arg = QString::fromLocal8Bit(argv[i]);
@@ -34,32 +33,25 @@ int main(int argc, char **argv) {
                 << "  --help, -h       Show help\n  --version, -v    Show version\n"
                 << "  --line N         Open at line N\n  --column N       Open at column N\n"
                 << "  --stdin, -       Open piped UTF-8 text (up to 8 MiB)\n"
-                << "  --proxy URL      Save HTTP/SOCKS5 proxy setting\n  --no-proxy       Clear proxy setting\n"
                 << "  --logs           Print log directory\n  --config         Print config path\n"
                 << "  --verbose        Also print Qt diagnostics to stderr\n  --wait           Wait until IDE closes (default)\n";
             return 0;
         }
         if (options && (arg == "--version" || arg == "-v")) {
-            QTextStream(stdout) << "EduCode 0.2.0\n"; return 0;
+            QTextStream(stdout) << "EduCode 0.3.0\n"; return 0;
         }
         if (options && arg == "--verbose") { qputenv("EDUCODE_VERBOSE", "1"); continue; }
         if (options && arg == "--wait") continue;
         if (options && arg == "--logs") { showLogs = true; continue; }
         if (options && arg == "--config") { showConfig = true; continue; }
         if (options && (arg == "--stdin" || arg == "-")) { stdinDocument = true; continue; }
-        if (options && arg == "--no-proxy") { proxySpecified = true; proxy.clear(); continue; }
-        if (options && (arg == "--line" || arg == "--column" || arg == "--proxy")) {
+        if (options && (arg == "--line" || arg == "--column")) {
             if (++i >= argc) { QTextStream(stderr) << "Missing value for " << arg << "\n"; return 2; }
             const auto value = QString::fromLocal8Bit(argv[i]);
-            if (arg == "--proxy") {
-                proxySpecified = true;
-                proxy = value.contains("://") ? value : "socks5://" + value;
-            } else {
-                bool valid;
-                const int number = value.toInt(&valid);
-                if (!valid || number < 1) { QTextStream(stderr) << "Expected positive number for " << arg << "\n"; return 2; }
-                if (arg == "--line") startLine = number; else startColumn = number;
-            }
+            bool valid;
+            const int number = value.toInt(&valid);
+            if (!valid || number < 1) { QTextStream(stderr) << "Expected positive number for " << arg << "\n"; return 2; }
+            if (arg == "--line") startLine = number; else startColumn = number;
             continue;
         }
         if (options && arg.startsWith('-')) { QTextStream(stderr) << "Unknown option: " << arg << "\n"; return 2; }
@@ -92,14 +84,13 @@ int main(int argc, char **argv) {
     app.setQuitOnLastWindowClosed(false);
     app.setOrganizationName(qEnvironmentVariableIsSet("EDUCODE_TEST_MODE") ? "EduCodeTests" : "EduCode");
     app.setApplicationName("EduCode");
-    app.setApplicationVersion("0.2.0");
+    app.setApplicationVersion("0.3.0");
     Log::initialize();
     const QString base = QCoreApplication::applicationDirPath();
     app.setWindowIcon(QIcon(base + "/assets/app_logo.png"));
     QQuickStyle::setStyle("Default");
     AppController controller;
     controller.setObjectName("backend");
-    if (proxySpecified && !controller.setSetting("network.proxy", proxy)) return 2;
     QQmlApplicationEngine engine;
     // Prefer the single coherent Qt runtime deployed beside the executable.
     engine.addImportPath(base);

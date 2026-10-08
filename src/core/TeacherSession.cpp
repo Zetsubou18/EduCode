@@ -1,4 +1,5 @@
 #include "TeacherSession.h"
+#include "Log.h"
 #include <QDateTime>
 #include <QHostAddress>
 #include <QJsonDocument>
@@ -62,11 +63,13 @@ void TeacherStudentsModel::clear() {
     endResetModel();
 }
 TeacherSession::TeacherSession(QObject *p) : QObject(p) {
+    Log::write("TEACHER", "Teacher session initialized");
     server.setProxy(QNetworkProxy::NoProxy);
     connect(&server, &QTcpServer::newConnection, this, [this] {
         while (server.hasPendingConnections()) {
             auto s = server.nextPendingConnection();
             if (peers.size() >= 64) {
+                Log::write("TEACHER", "Rejected connection: classroom limit reached");
                 s->disconnectFromHost();
                 s->deleteLater();
             } else
@@ -82,8 +85,12 @@ void TeacherSession::send(QTcpSocket *s, const QJsonObject &m) {
         return;
     auto bytes = QJsonDocument(m).toJson(QJsonDocument::Compact);
     if (bytes.size() > limit)
+    {
+        Log::write("TEACHER", "Message rejected: payload exceeds limit");
         return;
+    }
     if (s->bytesToWrite() > 4 * 1024 * 1024) {
+        Log::write("TEACHER", "Peer disconnected: outgoing queue exceeded 4 MiB");
         s->abort();
         return;
     }
@@ -96,6 +103,7 @@ void TeacherSession::attach(QTcpSocket *s) {
     p.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     p.seen = now();
     peers.insert(s, p);
+    Log::write("TEACHER", "Socket attached; peer=" + p.id);
     connect(s, &QTcpSocket::readyRead, this, [this, s] {
         if (!peers.contains(s))
             return;
@@ -104,6 +112,7 @@ void TeacherSession::attach(QTcpSocket *s) {
         while (p.buffer.size() >= 4) {
             quint32 n = qFromBigEndian<quint32>(reinterpret_cast<const uchar *>(p.buffer.constData()));
             if (n > limit || !n) {
+                Log::write("TEACHER", "Peer protocol error: invalid frame size=" + QString::number(n));
                 s->abort();
                 return;
             }
@@ -113,6 +122,7 @@ void TeacherSession::attach(QTcpSocket *s) {
             auto d = QJsonDocument::fromJson(p.buffer.mid(4, n), &error);
             p.buffer.remove(0, int(n) + 4);
             if (error.error != QJsonParseError::NoError || !d.isObject()) {
+                Log::write("TEACHER", "Peer protocol error: invalid JSON");
                 s->abort();
                 return;
             }
@@ -135,9 +145,11 @@ void TeacherSession::attach(QTcpSocket *s) {
             remoteText.clear();
             frame.clear();
             lastFrame.clear();
-            if (status == QStringLiteral("Подключено") || status == QStringLiteral("Подключение…") ||
-                status.isEmpty())
-                status = QStringLiteral("Отключено");
+            if (status == QStringLiteral("Подключено") || status == QStringLiteral("Подключение…") || status.isEmpty())
+                status = QStringLiteral("Соединение потеряно");
+            Log::write("TEACHER", "Student disconnected: " + status);
+            if (!manualStop)
+                emit connectionLost(status);
             emit remoteChanged();
             emit frameChanged();
         } else if (watched) {
@@ -147,14 +159,15 @@ void TeacherSession::attach(QTcpSocket *s) {
             emit remoteChanged();
         }
         s->deleteLater();
+        if (!client)
+            Log::write("TEACHER", "Student peer disconnected");
         emit changed();
     });
     connect(s, QOverload<QAbstractSocket::SocketError>::of(&QTcpSocket::errorOccurred), this,
             [this, s](QAbstractSocket::SocketError) {
                 const auto message = s->errorString();
-                if (s == upstream && s->state() == QAbstractSocket::UnconnectedState)
-                    stop();
-                status = message;
+                status = QStringLiteral("Ошибка сети: ") + message;
+                Log::write("TEACHER", status);
                 emit changed();
             });
 }
@@ -163,6 +176,7 @@ void TeacherSession::create() {
     status.clear();
     if (!server.listen(QHostAddress::AnyIPv4, 0)) {
         status = server.errorString();
+        Log::write("TEACHER", "Failed to create classroom: " + status);
         emit changed();
         return;
     }
@@ -171,15 +185,19 @@ void TeacherSession::create() {
     last = {};
     revision = 0;
     status = QStringLiteral("Ожидание учеников");
+    Log::write("TEACHER", "Classroom created; port=" + QString::number(port));
     emit changed();
 }
 void TeacherSession::join(const QString &ip, int number) {
     QHostAddress address;
     if (!address.setAddress(ip.trimmed()) || number < 1 || number > 65535) {
         status = QStringLiteral("Введите IP и порт 1–65535");
+        Log::write("TEACHER", "Connection rejected: invalid address or port");
         emit changed();
         return;
     }
+    lastHost = ip.trimmed();
+    lastPort = number;
     stop();
     status = QStringLiteral("Подключение…");
     role = "connecting";
@@ -193,9 +211,17 @@ void TeacherSession::join(const QString &ip, int number) {
                  {"name", displayName ? displayName() : QStringLiteral("Ученик")}});
     });
     s->connectToHost(address, quint16(number));
+    Log::write("TEACHER", QString("Connecting to %1:%2").arg(lastHost).arg(lastPort));
     emit changed();
 }
+void TeacherSession::reconnect() {
+    if (!lastHost.isEmpty() && lastPort > 0) {
+        Log::write("TEACHER", "Reconnect requested");
+        join(lastHost, lastPort);
+    }
+}
 void TeacherSession::stop() {
+    manualStop = true;
     status.clear();
     server.close();
     auto sockets = peers.keys();
@@ -218,6 +244,8 @@ void TeacherSession::stop() {
     emit changed();
     emit remoteChanged();
     emit frameChanged();
+    manualStop = false;
+    Log::write("TEACHER", "Session stopped");
 }
 QVariantList TeacherSession::students() const {
     QVariantList result;
@@ -232,6 +260,7 @@ void TeacherSession::kick(const QString &id) {
     for (auto s : peers.keys())
         if (peers[s].id == id) {
             send(s, {{"type", "end"}, {"reason", QStringLiteral("Учитель отключил вас")}});
+            Log::write("TEACHER", "Teacher kicked peer=" + id);
             s->disconnectFromHost();
         }
 }
@@ -266,6 +295,7 @@ void TeacherSession::receive(QTcpSocket *s, const QJsonObject &m) {
         if (p.name.isEmpty())
             p.name = QStringLiteral("Ученик");
         p.welcomed = true;
+        Log::write("TEACHER", "Student joined: " + p.name + "; peer=" + p.id);
         rosterModel.add(p.id, p.name);
         status = QStringLiteral("Конференция активна");
         send(s, {{"type", "welcome"}});
@@ -278,6 +308,7 @@ void TeacherSession::receive(QTcpSocket *s, const QJsonObject &m) {
     if (s == upstream && type == "welcome" && role == "connecting") {
         role = "student";
         status = QStringLiteral("Подключено");
+        Log::write("TEACHER", "Student connection established");
         p.welcomed = true;
         last = {};
         publish(true);
@@ -339,6 +370,7 @@ void TeacherSession::receive(QTcpSocket *s, const QJsonObject &m) {
     }
     if (s == upstream && type == "end") {
         status = m["reason"].toString();
+        Log::write("TEACHER", "Teacher ended connection: " + status);
         s->disconnectFromHost();
     }
 }
@@ -362,6 +394,7 @@ void TeacherSession::tick() {
     for (auto s : peers.keys()) {
         auto &p = peers[s];
         if (time - p.seen > 15000) {
+            Log::write("TEACHER", QString("Peer timeout; peer=%1 lastSeenMs=%2").arg(p.id).arg(time - p.seen));
             s->abort();
             continue;
         }

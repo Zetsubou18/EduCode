@@ -1,4 +1,4 @@
-"""Offline provider, quota and proxy regressions; no Groq API calls."""
+"""Offline provider and retry regressions; no Gemini API calls."""
 import ast, io, json, os, sys, tempfile, unittest, urllib.error, urllib.request
 from pathlib import Path
 from unittest.mock import patch, Mock
@@ -6,7 +6,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
 import ai_http
 source=Path(__file__).resolve().parents[1]/'tools/ai-agent.py'
 function=next(n for n in ast.parse(source.read_text(encoding='utf-8')).body if isinstance(n,ast.FunctionDef) and n.name=='ollama')
-namespace=dict(request={'provider':'ollama','model':'test-model'},base='http://localhost:11434',os=os,json=json,urllib=__import__('urllib'),groq_request=ai_http.groq_request,emit=lambda *args,**kw:None)
+namespace=dict(request={'provider':'ollama','model':'test-model'},base='http://localhost:11434',os=os,json=json,urllib=__import__('urllib'),gemini_request=ai_http.gemini_request,emit=lambda *args,**kw:None)
 exec(compile(ast.Module(body=[function],type_ignores=[]),str(source),'exec'),namespace)
 class Clock:
     def __init__(self): self.now=1000000.;self.waits=[]
@@ -43,32 +43,35 @@ class Tests(unittest.TestCase):
             return io.BytesIO(b'{"message":{"content":"local"}}')
         namespace['request']['provider']='ollama'
         with patch('urllib.request.urlopen',respond):self.assertEqual(namespace['ollama']([])['content'],'local')
-    def test_groq_retry_and_payload(self):
-        response=io.BytesIO(b'{"choices":[{"message":{"content":"ok"}}],"usage":{"total_tokens":12}}');response.headers={}
-        error=urllib.error.HTTPError('https://api.groq.com',429,'limit',{'retry-after':'7'},None)
+    def test_gemini_retry_and_payload(self):
+        response=io.BytesIO(b'{"choices":[{"message":{"content":"ok"}}]}');response.headers={}
+        error=urllib.error.HTTPError('https://generativelanguage.googleapis.com',429,'limit',{'retry-after':'0'},None)
         opener=Mock();opener.open.side_effect=[error,response]
-        quota=Mock();quota.reserve.return_value=1
-        with patch('ai_http.build_opener',return_value=opener),patch('ai_http.Quota',return_value=quota):
-            result=ai_http.groq_request({'model':'m','messages':[],'max_completion_tokens':1024},'test-key','',self.temp.name,(30,1000,8000,200000))
+        with patch('ai_http.build_opener',return_value=opener),patch('ai_http.time.sleep'):
+            result=ai_http.gemini_request({'model':'m','messages':[],'max_completion_tokens':1024},'test-key')
         self.assertEqual(result['content'],'ok');self.assertEqual(opener.open.call_count,2)
-        self.assertEqual(quota.update.call_args_list[0].kwargs['cooldown'],7)
         req=opener.open.call_args[0][0]
         self.assertEqual(req.get_header('Authorization'),'Bearer test-key')
-        self.assertEqual(req.get_header('User-agent'),'EduCode/0.2 (Groq client)')
+        self.assertEqual(req.get_header('User-agent'),'EduCode/0.3 (Gemini client)')
+        self.assertIn('generativelanguage.googleapis.com',req.full_url)
         self.assertNotIn('options',json.loads(req.data))
     def test_retry_bounded(self):
         opener=Mock();opener.open.side_effect=urllib.error.HTTPError('x',429,'limit',{'retry-after':'2'},None)
-        with patch('ai_http.build_opener',return_value=opener),patch('ai_http.Quota'):
-            with self.assertRaisesRegex(RuntimeError,'Повторить'):ai_http.groq_request({'model':'m','messages':[]},'key','',self.temp.name,(30,1000,8000,200000))
-        self.assertEqual(opener.open.call_count,3)
-    def test_socks_remote_dns(self):
-        sock=Mock();sock.recv.side_effect=[b'\x05\x00',b'\x05\x00\x00\x01',b'\x7f\x00\x00\x01',b'\x01\xbb']
-        with patch('socket.create_connection',return_value=sock):self.assertIs(ai_http.socks_connect('socks5://localhost:1080','api.groq.com',443,5),sock)
-        self.assertIn(b'api.groq.com',sock.sendall.call_args_list[1].args[0])
-    def test_proxy_handlers(self):
-        for url in ['socks5://localhost:1080','http://localhost:8080']:
-            self.assertTrue(ai_http.build_opener(url).handlers)
-        with self.assertRaises(ValueError):ai_http.build_opener('invalid://localhost')
+        with patch('ai_http.build_opener',return_value=opener),patch('ai_http.time.sleep'):
+            with self.assertRaisesRegex(RuntimeError,'Повторить'):ai_http.gemini_request({'model':'m','messages':[]},'key')
+        self.assertEqual(opener.open.call_count,4)
+    def test_gemini_retries_503(self):
+        response=io.BytesIO(b'{"choices":[{"message":{"content":"recovered"}}]}');response.headers={}
+        opener=Mock();opener.open.side_effect=[urllib.error.HTTPError('x',503,'busy',{},io.BytesIO(b'{"error":{"message":"overloaded"}}')),response]
+        updates=[]
+        with patch('ai_http.build_opener',return_value=opener),patch('ai_http.time.sleep'):
+            result=ai_http.gemini_request({'model':'gemini-3.1-flash-lite','messages':[]},'key',updates.append)
+        self.assertEqual(result['content'],'recovered');self.assertIn('503',updates[0])
+    def test_gemini_explains_404_without_retry(self):
+        opener=Mock();opener.open.side_effect=urllib.error.HTTPError('x',404,'missing',{},io.BytesIO(b'{}'))
+        with patch('ai_http.build_opener',return_value=opener):
+            with self.assertRaisesRegex(RuntimeError,'не нашёл модель'):ai_http.gemini_request({'model':'openai/wrong','messages':[]},'key')
+        self.assertEqual(opener.open.call_count,1)
     def test_context_keeps_tool_pairs(self):
         body={'model':'m','messages':[{'role':'system','content':'s'},{'role':'user','content':'old'*10000},{'role':'assistant','tool_calls':[{'id':'1'}],'content':''},{'role':'tool','tool_call_id':'1','content':'result'},{'role':'user','content':'latest'}]}
         fitted,cost=ai_http.fit_context(body,8000,1024)

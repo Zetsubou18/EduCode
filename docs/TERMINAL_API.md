@@ -30,8 +30,6 @@
 | `EduCode first.py second.py` | Открыть несколько файлов. Путь с пробелами берите в кавычки. |
 | `--line N`, `--column N` | Позиция в открываемом файле, отсчёт с 1. |
 | `--stdin` или `-` | Открыть текст UTF-8 из стандартного ввода, максимум 8 МиБ. |
-| `--proxy URL` | Сохранить HTTP/SOCKS5-прокси. |
-| `--no-proxy` | Очистить явный прокси. |
 | `--config` | Напечатать путь к конфигурации. |
 | `--logs` | Напечатать путь к журналам. |
 | `--verbose` | Дополнительно выводить сообщения Qt в stderr. |
@@ -47,7 +45,7 @@
 | Функция | Аргументы | Результат и действие |
 |---|---|---|
 | `notify(title, message='')` | Две строки | Показать уведомление. |
-| `get_settings()` | Нет | Словарь настроек, без секретного ключа Groq. |
+| `get_settings()` | Нет | Словарь настроек, без секретного ключа Gemini. |
 | `configure(**changes)` | Имена ключей конфигурации | Изменить настройки и вернуть обновлённый словарь. Для ключей с точкой: `configure(**{'editor.fontSize': 16})`. |
 | `command(name)` | Имя команды IDE | Выполнить команду из таблицы ниже. |
 | `context()` | Нет | Словарь с `project`, `activeFile`, `activeCode`, `problems`, `console`, `terminal`, `packages`, `settings`, `log`, `time`, `os`, `architecture`. |
@@ -81,7 +79,7 @@ educode.command('quickOpen')
 
 The Terminal tab runs the normal OS shell in the project directory: `cmd.exe` on Windows or the user's shell on Linux. The project `.venv` comes first in `PATH`, so `python` and `pip` use it. EduCode has **no separate terminal command language**. Available commands depend on the OS and installed software; use `help`, `man command`, or `command --help` for the full system-specific command set. The table above shows common commands on both platforms.
 
-Run `EduCode` (or `EduCode.exe` on Windows) to open the IDE, `EduCode .` for the current folder, `EduCode project/` for a project, and `EduCode first.py second.py` for files. Quote paths containing spaces. CLI options: `--line N`, `--column N` (1-based position); `--stdin`/`-` (up to 8 MiB UTF-8 from stdin); `--proxy URL`, `--no-proxy`; `--config`, `--logs`; `--verbose`; `--wait` (already the default); `--version`/`-v`; `--help`/`-h`; and `--` to end option parsing.
+Run `EduCode` (or `EduCode.exe` on Windows) to open the IDE, `EduCode .` for the current folder, `EduCode project/` for a project, and `EduCode first.py second.py` for files. Quote paths containing spaces. CLI options: `--line N`, `--column N` (1-based position); `--stdin`/`-` (up to 8 MiB UTF-8 from stdin); `--config`, `--logs`; `--verbose`; `--wait` (already the default); `--version`/`-v`; `--help`/`-h`; and `--` to end option parsing.
 
 ### Built-in `import educode` API
 
@@ -90,7 +88,7 @@ The library is available to Python started by the IDE, its console, or its termi
 | Function | Purpose |
 |---|---|
 | `notify(title, message='')` | Show a notification. |
-| `get_settings()` | Return settings except the Groq secret. |
+| `get_settings()` | Return settings except the Gemini secret. |
 | `configure(**changes)` | Update settings; use `configure(**{'editor.fontSize': 16})` for dotted keys. |
 | `command(name)` | Run a built-in command; supported names are listed above. |
 | `context()` | Return project, active file/code, problems, consoles, packages, settings, log tail, time, OS, and architecture. |

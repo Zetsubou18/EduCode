@@ -44,6 +44,6 @@ with zipfile.ZipFile(bundle_zip, 'w', zipfile.ZIP_DEFLATED, compresslevel=6, all
         if source.is_file() and source.name != 'vc_redist.x64.exe':
             method = zipfile.ZIP_STORED if source == payload_zip else zipfile.ZIP_DEFLATED
             result.write(source, source.relative_to(runtime).as_posix(), compress_type=method)
-target = release / 'EduCodeSetup-0.2.0-win64.exe'
+target = release / 'EduCodeSetup-0.3.0-win64.exe'
 bootstrap(target, bundle_zip)
 print(f'{target} ({target.stat().st_size / 1024 / 1024:.1f} MiB)')

@@ -4,12 +4,18 @@
 
 EduCode — настольная Python IDE для Windows и Linux. В основе — редактор Monaco, диагностика Pyright, терминал, файловый менеджер и необязательные плагины на Python. Интерфейс построен на C++17 и Qt 5.15; программа работает локально.
 
+![EduCode в Windows](assets/screenshots/educode-windows.png)
+
+![EduCode в Linux](assets/screenshots/educode-linux.png)
+
+Подробности обновления: [EduCode 0.3.0](docs/RELEASE_NOTES_0.3.0.md).
+
 ## Установка
 
 | Система | Скачать | Установить |
 | --- | --- | --- |
-| Windows x64 | [EduCodeSetup-0.2.0-win64.exe](https://github.com/Zetsubou18/EduCode/releases/latest/download/EduCodeSetup-0.2.0-win64.exe) | Запустите установщик и выберите папку. По умолчанию используется `%LOCALAPPDATA%\Programs\EduCode`. |
-| Ubuntu/Debian amd64 | [educode_0.2.0_amd64.deb](https://github.com/Zetsubou18/EduCode/releases/latest/download/educode_0.2.0_amd64.deb) | После скачивания выполните `sudo apt install ./educode_0.2.0_amd64.deb` из папки с файлом. |
+| Windows x64 | [EduCodeSetup-0.3.0-win64.exe](https://github.com/Zetsubou18/EduCode/releases/latest/download/EduCodeSetup-0.3.0-win64.exe) | Запустите установщик и выберите папку. По умолчанию используется `%LOCALAPPDATA%\Programs\EduCode`. |
+| Ubuntu/Debian amd64 | [educode_0.3.0_amd64.deb](https://github.com/Zetsubou18/EduCode/releases/latest/download/educode_0.3.0_amd64.deb) | После скачивания выполните `sudo apt install ./educode_0.3.0_amd64.deb` из папки с файлом. |
 
 Установщик Windows предлагает ярлыки на рабочем столе и в меню «Пуск». Закрепить приложение на панели задач можно через контекстное меню запущенной программы. Пакет Debian устанавливает пункт меню приложений и команду `EduCode`.
 
@@ -37,8 +43,8 @@ EduCode is a local desktop Python IDE for Windows and Linux. Its core includes M
 
 | System | Download | Install |
 | --- | --- | --- |
-| Windows x64 | [EduCodeSetup-0.2.0-win64.exe](https://github.com/Zetsubou18/EduCode/releases/latest/download/EduCodeSetup-0.2.0-win64.exe) | Run the installer and choose a folder. The default is `%LOCALAPPDATA%\Programs\EduCode`. |
-| Ubuntu/Debian amd64 | [educode_0.2.0_amd64.deb](https://github.com/Zetsubou18/EduCode/releases/latest/download/educode_0.2.0_amd64.deb) | From the download folder, run `sudo apt install ./educode_0.2.0_amd64.deb`. |
+| Windows x64 | [EduCodeSetup-0.3.0-win64.exe](https://github.com/Zetsubou18/EduCode/releases/latest/download/EduCodeSetup-0.3.0-win64.exe) | Run the installer and choose a folder. The default is `%LOCALAPPDATA%\Programs\EduCode`. |
+| Ubuntu/Debian amd64 | [educode_0.3.0_amd64.deb](https://github.com/Zetsubou18/EduCode/releases/latest/download/educode_0.3.0_amd64.deb) | From the download folder, run `sudo apt install ./educode_0.3.0_amd64.deb`. |
 
 The Windows installer offers Desktop and Start Menu shortcuts. Pinning to the taskbar is available from the running app’s Windows context menu. The Debian package adds an application menu entry and the `EduCode` command.
 

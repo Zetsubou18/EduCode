@@ -1,8 +1,22 @@
-// PTY is isolated here: ConPTY on Windows, forkpty on Linux/macOS.
-const pty = require('node-pty');
+// ConPTY stays in node-pty on Windows. Linux uses Python's standard-library
+// pty helper so the Debian package does not ship an Ubuntu-specific native addon.
 const readline = require('readline');
 const path = require('path');
 const win = process.platform === 'win32';
+if (!win) {
+  const {spawn} = require('child_process');
+  const helper = path.join(__dirname, 'terminal-linux.py');
+  const python = process.argv[3] || 'python3';
+  const child = spawn(python, [helper, process.argv[2], python], {stdio: 'inherit'});
+  child.on('error', error => {
+    process.stdout.write(JSON.stringify({error:'Terminal: '+String(error)})+'\n');
+    process.exit(1);
+  });
+  child.on('exit', code => process.exit(code === null ? 1 : code));
+  process.on('SIGTERM', () => child.kill('SIGTERM'));
+  return;
+}
+const pty = require('node-pty');
 const env = {...process.env, VIRTUAL_ENV: path.dirname(path.dirname(process.argv[3]))};
 const pathKey = Object.keys(env).find(key=>key.toLowerCase()==='path');
 const systemPath = pathKey ? env[pathKey] : '';

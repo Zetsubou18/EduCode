@@ -8,7 +8,7 @@ Item {
  property int activePanel: -1
  property real panelWidth: 0
  property bool browserCreated: false
- property string aiModel: backend.configuration[backend.configuration["ai.provider"]==="groq" ? "ai.groqModel" : "ai.model"] || ""
+ property string aiModel: String(backend.configuration[backend.configuration["ai.provider"]==="gemini" ? "ai.geminiModel" : "ai.model"] || "")
  property var titles: ["Уведомления","Браузер","Лира"].map(function(s){return backend.translate(s,backend.configuration["general.language"]);})
  property var pluginPanels: backend.plugins.filter(function(p){return p.enabled&&p.sidebar&&p.sidebar.url;})
  onPluginPanelsChanged: if(activePanel>=3 && !pluginPanels[activePanel-3]){activePanel=-1;panelWidth=0;}
@@ -65,7 +65,7 @@ Item {
        C.ActionButton { glyph: "close"; subtle: true; implicitWidth: 30; hint: backend.translate("Удалить чат",backend.configuration["general.language"]); enabled: !backend.ai.busy; onClicked: backend.ai.deleteChat(backend.ai.activeChat) }
       }
       Rectangle { Layout.fillWidth: true; height: 1; color: C.Theme.border }
-      ColumnLayout { visible: backend.configuration["ai.provider"]!=="groq" && !backend.ai.ollamaAvailable; Layout.fillWidth: true; Layout.fillHeight: true; spacing: 12
+      ColumnLayout { visible: backend.configuration["ai.provider"]==="ollama" && !backend.ai.ollamaAvailable; Layout.fillWidth: true; Layout.fillHeight: true; spacing: 12
        Item { Layout.fillHeight: true }
        C.Icon { name: "ai"; size: 36; color: C.Theme.accent; Layout.alignment: Qt.AlignHCenter }
        Text { text: backend.translate("Для Лиры нужна Ollama",backend.configuration["general.language"]); color: C.Theme.text; font.pixelSize: 16; Layout.alignment: Qt.AlignHCenter }
@@ -74,7 +74,7 @@ Item {
        C.ActionButton { text: backend.translate("Проверить снова",backend.configuration["general.language"]); subtle: true; Layout.alignment: Qt.AlignHCenter; onClicked: backend.ai.probe() }
        Item { Layout.fillHeight: true }
       }
-      ColumnLayout { visible: backend.configuration["ai.provider"]==="groq" || backend.ai.ollamaAvailable; Layout.fillWidth: true; Layout.fillHeight: true; spacing: 8
+      ColumnLayout { visible: backend.configuration["ai.provider"]==="gemini" || backend.ai.ollamaAvailable; Layout.fillWidth: true; Layout.fillHeight: true; spacing: 8
        ListView {
         id: chatMessages; Layout.fillWidth: true; Layout.fillHeight: true; model: backend.ai.messages; clip: true; spacing: 9
         delegate: Rectangle {

@@ -12,34 +12,24 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QSysInfo>
 #include <QUrl>
-#include <QNetworkProxy>
+#include <QVersionNumber>
 #include <QProcess>
 #include <QProcessEnvironment>
-namespace {
-void applyProxy(const QVariantMap &settings) {
-#ifdef Q_OS_LINUX
-    Q_UNUSED(settings)
-    QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
-    return;
-#endif
-    const auto text = settings.value("network.proxy").toString();
-    if (text.isEmpty()) { QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy); return; }
-    const QUrl url(text);
-    QNetworkProxy proxy(url.scheme().startsWith("socks5") ? QNetworkProxy::Socks5Proxy : QNetworkProxy::HttpProxy,
-        url.host(), quint16(url.port()), url.userName(), url.password());
-    QNetworkProxy::setApplicationProxy(proxy);
-}
-}
 AppController::AppController(QObject *p)
     : QObject(p), config(this), control(this), tray(this), search(this), docs(this), python(this), fs(this),
       runner(this), language(this), terminal(this), packageManager(this), assistant(this) {
-    applyProxy(config.values);
     connect(&teacherSession, &TeacherSession::changed, this, [this] { runner.demoMode = teacherSession.property("role").toString() == "teacher"; });
+    connect(&teacherSession, &TeacherSession::connectionLost, this, [this](const QString &reason) {
+        notify(QStringLiteral("Teacher Mode: соединение потеряно"),
+               reason + QStringLiteral(". Нажмите «Переподключиться» в панели Teacher Mode."));
+    });
     teacherSession.displayName = [this] { return config.values["general.displayName"].toString(); };
     teacherSession.document = [this] { return QJsonObject{{"path", docs.active}, {"text", docs.entries.value(docs.active).text}}; };
     teacherSession.applyEdit = [this](const QString &path, const QString &text) {
@@ -56,20 +46,28 @@ AppController::AppController(QObject *p)
         tray.show();
     connect(&tray, &QSystemTrayIcon::messageClicked, this, [this] { emit sidebarRequested(0); });
     connect(&config, &Configuration::changed, this, [this] {
-        applyProxy(config.values);
         language.configure(config.values["python.extraPaths"].toStringList() + QStringList{runtime("tools")});
-        assistant.configure([this] { auto values = config.values;
-#ifdef Q_OS_LINUX
-        values["network.proxy"] = "";
-#endif
-        return values; }(), runtime("tools/ai-agent.py"), control.endpointPath, pythonPath());
+        assistant.configure(config.values, runtime("tools/ai-agent.py"), control.endpointPath, pythonPath());
         emit configurationChanged();
         Log::write("CONFIG", "Configuration updated");
     });
     connect(&config, &Configuration::rejected, this, &AppController::error);
     connect(this, &AppController::error, this, [](const QString &message) { Log::write("ERROR", message); });
     connect(&packageManager, &PackageManager::error, this, &AppController::error);
-    connect(&packageManager, &PackageManager::packagesChanged, &search, &SearchService::refresh);
+    connect(&packageManager, &PackageManager::packagesChanged, this, [this] {
+        search.refresh();
+        search.refreshLibraries();
+        if (!project.isEmpty() && QFileInfo::exists(pythonPath())) {
+            beginTask("pyright", QStringLiteral("Python-анализатор"), QStringLiteral("Перечитываю установленные библиотеки…"), 20);
+            language.start(node(), runtime("node_modules/pyright/dist/pyright-langserver.js"), project, pythonPath());
+        }
+    });
+    connect(&packageManager, &PackageManager::changed, this, [this] {
+        if (packageManager.busy())
+            beginTask("packages", QStringLiteral("Менеджер библиотек"), packageManager.status(), 35);
+        else if (tasks.contains("packages"))
+            finishTask("packages", packageManager.status());
+    });
     connect(&assistant, &AiAssistant::error, this, &AppController::error);
     connect(&assistant, &AiAssistant::requestInstall, this,
             [] { QDesktopServices::openUrl(QUrl("https://ollama.com/download")); });
@@ -97,11 +95,11 @@ AppController::AppController(QObject *p)
         if (method == "notify")
             return QVariantMap{{"ok", notify(args["title"].toString(), args["message"].toString())}};
         if (method == "config.get")
-            return QVariantMap{{"ok", true}, {"result", [&] { auto v = config.values; v.remove("ai.groqApiKey"); return v; }()}};
+            return QVariantMap{{"ok", true}, {"result", [&] { auto v = config.values; v.remove("ai.geminiApiKey"); return v; }()}};
         if (method == "config.patch") {
             QString message;
             const bool ok = config.patch(args, &message);
-            return QVariantMap{{"ok", ok}, {"error", message}, {"result", [&] { auto v = config.values; v.remove("ai.groqApiKey"); return v; }()}};
+            return QVariantMap{{"ok", ok}, {"error", message}, {"result", [&] { auto v = config.values; v.remove("ai.geminiApiKey"); return v; }()}};
         }
         if (method == "command" && Commands::defaultBindings().contains(args["name"].toString())) {
             command(args["name"].toString());
@@ -151,7 +149,7 @@ AppController::AppController(QObject *p)
                                        {"console", consoleBuffer.right(30000)},
                                        {"terminal", terminalBuffer.right(30000)},
                                        {"packages", packageManager.items()},
-                                       {"settings", [&] { auto v = config.values; v.remove("ai.groqApiKey"); return v; }()},
+                                        {"settings", [&] { auto v = config.values; v.remove("ai.geminiApiKey"); return v; }()},
                                        {"log", logTail},
                                        {"time", QDateTime::currentDateTime().toString(Qt::ISODate)},
                                        {"os", QSysInfo::prettyProductName()},
@@ -216,7 +214,7 @@ AppController::AppController(QObject *p)
         if (method == "package.action") {
             const auto action = args["action"].toString(), name = args["name"].toString();
             if (action == "install")
-                packageManager.install(name);
+                packageManager.install(name, QString());
             else if (action == "update")
                 packageManager.update(name);
             else if (action == "remove")
@@ -234,21 +232,32 @@ AppController::AppController(QObject *p)
         }
         if (method == "memory.update") {
             const auto key = args["key"].toString().trimmed(), kind = args["kind"].toString();
-            const auto setting = kind == "user" ? "ai.userMemory" : "ai.factMemory";
             if (key.isEmpty() || (kind != "user" && kind != "facts"))
                 return QVariantMap{{"ok", false}, {"error", "Некорректная память."}};
-            auto memory = config.values[setting].toMap();
+            auto memory = config.values["ai.factMemory"].toMap();
             if (args["value"].toString().isEmpty())
                 memory.remove(key);
             else
                 memory[key] = args["value"].toString().left(2000);
             QString error;
-            bool ok = config.set(setting, memory, &error);
+            bool ok = config.set("ai.factMemory", memory, &error);
             return QVariantMap{{"ok", ok}, {"error", error}, {"result", memory}};
         }
         return QVariantMap{{"ok", false}, {"error", "Unknown method"}};
     };
     connect(&search, &SearchService::changed, this, &AppController::searchChanged);
+    connect(&search, &SearchService::scanStarted, this, [this] {
+        if (!project.isEmpty()) beginTask("project-index", QStringLiteral("Индексирование проекта"), QStringLiteral("Сканирую файлы…"), 20);
+    });
+    connect(&search, &SearchService::scanFinished, this, [this](int files) {
+        finishTask("project-index", QStringLiteral("Файлов: %1").arg(files));
+    });
+    connect(&search, &SearchService::libraryIndexStarted, this, [this] {
+        if (!project.isEmpty()) beginTask("library-index", QStringLiteral("Индексирование Python"), QStringLiteral("Анализирую библиотеки…"), 15);
+    });
+    connect(&search, &SearchService::libraryIndexFinished, this, [this](int entries, bool ok) {
+        finishTask("library-index", ok ? QStringLiteral("Символов: %1").arg(entries) : QStringLiteral("Ошибка индексирования"));
+    });
     connect(this, &AppController::documentClosed, &search, &SearchService::forgetDocument);
     connect(&search, &SearchService::indexChanged, this, [this] {
         if (!target.isEmpty() && !QFileInfo::exists(target)) {
@@ -266,8 +275,8 @@ AppController::AppController(QObject *p)
             emit error(message);
     });
     connect(&python, &PythonEnvironment::changed, this, &AppController::stateChanged);
-    connect(&python, &PythonEnvironment::created, this, [this](const QString &p) { enterProject(p); });
-    connect(&python, &PythonEnvironment::error, this, &AppController::error);
+    connect(&python, &PythonEnvironment::created, this, [this](const QString &p) { finishTask("python-env", QStringLiteral("Среда готова")); enterProject(p); });
+    connect(&python, &PythonEnvironment::error, this, [this](const QString &text) { finishTask("python-env", QStringLiteral("Ошибка")); emit error(text); });
     connect(&runner, &ProcessRunner::output, this, [this](const QString &text) {
         consoleBuffer += text;
         if (consoleBuffer.size() > 100000)
@@ -290,22 +299,58 @@ AppController::AppController(QObject *p)
     connect(&terminal, &TerminalSession::error, this, &AppController::error);
     connect(&language, &LanguageServer::message, this, &AppController::lspMessage);
     connect(&language, &LanguageServer::initialized, this, [this] {
-        currentStatus = "Python · Pyright";
+        currentStatus = "Готово";
+        finishTask("pyright", QStringLiteral("Анализ кода готов"));
         emit stateChanged();
         emit languageReady();
     });
     connect(&language, &LanguageServer::error, this, [this](const QString &text) {
         currentStatus = "Python: сервер недоступен";
+        finishTask("pyright", QStringLiteral("Сервер недоступен"));
         emit stateChanged();
         emit error(text);
     });
     language.configure(config.values["python.extraPaths"].toStringList() + QStringList{runtime("tools")});
-    assistant.configure([this] { auto values = config.values;
-#ifdef Q_OS_LINUX
-        values["network.proxy"] = "";
-#endif
-        return values; }(), runtime("tools/ai-agent.py"), control.endpointPath, QString());
+    assistant.configure(config.values, runtime("tools/ai-agent.py"), control.endpointPath, QString());
+    auto snapshotTimer = new QTimer(this);
+    snapshotTimer->setInterval(5 * 60 * 1000);
+    connect(snapshotTimer, &QTimer::timeout, this, &AppController::writeAutoSnapshot);
+    snapshotTimer->start();
+    QTimer::singleShot(3000, this, &AppController::writeAutoSnapshot);
     QTimer::singleShot(0, &python, &PythonEnvironment::discover);
+    if (!qEnvironmentVariableIsSet("EDUCODE_TEST_MODE"))
+        QTimer::singleShot(1800, this, &AppController::checkForUpdates);
+}
+
+void AppController::checkForUpdates() {
+    if (!config.values.value("updates.enabled", true).toBool())
+        return;
+    QNetworkRequest request{QUrl("https://api.github.com/repos/Zetsubou18/EduCode/releases/latest")};
+    request.setRawHeader("Accept", "application/vnd.github+json");
+    request.setRawHeader("User-Agent", "EduCode/" + QCoreApplication::applicationVersion().toUtf8());
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+    auto reply = updateNetwork.get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        const auto data = reply->readAll();
+        const auto networkError = reply->error();
+        const auto networkMessage = reply->errorString();
+        reply->deleteLater();
+        if (networkError != QNetworkReply::NoError) {
+            Log::write("UPDATE", "Update check skipped: " + networkMessage);
+            return;
+        }
+        const auto object = QJsonDocument::fromJson(data).object();
+        auto tag = object.value("tag_name").toString().trimmed();
+        if (tag.startsWith('v', Qt::CaseInsensitive))
+            tag.remove(0, 1);
+        const auto available = QVersionNumber::fromString(tag);
+        const auto current = QVersionNumber::fromString(QCoreApplication::applicationVersion());
+        if (!available.isNull() && QVersionNumber::compare(available, current) > 0)
+            notify(QStringLiteral("Доступно обновление EduCode ") + tag,
+                   QStringLiteral("Новая версия опубликована на GitHub. Откройте репозиторий EduCode, чтобы скачать обновление."));
+        else
+            Log::write("UPDATE", "No newer GitHub release found");
+    });
 }
 QString AppController::runtime(const QString &p) const {
     if (p == "tools/ai-agent.py" && qEnvironmentVariableIsSet("EDUCODE_TEST_MODE") &&
@@ -392,6 +437,7 @@ void AppController::createProject(const QString &name, const QString &py, const 
         return;
     }
     currentStatus = "Создаём виртуальное окружение…";
+    beginTask("python-env", QStringLiteral("Подготовка Python"), QStringLiteral("Создаю виртуальное окружение…"), 10);
     emit stateChanged();
     python.create(path, py);
 }
@@ -401,6 +447,7 @@ void AppController::prepareEnvironment(const QString &path, const QString &py) {
         emit error("Выберите Python.");
         return;
     }
+    beginTask("python-env", QStringLiteral("Подготовка Python"), QStringLiteral("Создаю виртуальное окружение…"), 10);
     python.create(path, py);
 }
 void AppController::addPython(const QString &url) {
@@ -430,12 +477,9 @@ void AppController::enterProject(const QString &path) {
     fs.setRoot(project);
     search.setProject(project, pythonPath());
     packageManager.configure(QFileInfo::exists(pythonPath()) ? pythonPath() : QString(), runtime("tools/package-helper.py"));
-    assistant.configure([this] { auto values = config.values;
-#ifdef Q_OS_LINUX
-        values["network.proxy"] = "";
-#endif
-        return values; }(), runtime("tools/ai-agent.py"), control.endpointPath, pythonPath());
+    assistant.configure(config.values, runtime("tools/ai-agent.py"), control.endpointPath, pythonPath());
     currentPage = "ide";
+    beginTask("project-open", QStringLiteral("Открытие проекта"), QStringLiteral("Восстанавливаю редактор и файлы…"), 55);
     target = prefs.value("projects/" + project + "/target").toString();
     auto recent = prefs.value("recent").toStringList();
     recent.removeAll(project);
@@ -461,7 +505,11 @@ void AppController::enterProject(const QString &path) {
     activate(startupLine, startupColumn);
     if (editorConnected) { startupLine = 0; startupColumn = 0; }
     if (QFileInfo::exists(pythonPath()))
+    {
+        beginTask("pyright", QStringLiteral("Python-анализатор"), QStringLiteral("Запускаю Pyright…"), 25);
         language.start(node(), runtime("node_modules/pyright/dist/pyright-langserver.js"), project, pythonPath());
+    }
+    finishTask("project-open", QStringLiteral("Проект открыт"));
 }
 void AppController::persist() {
     if (project.isEmpty())
@@ -750,6 +798,8 @@ void AppController::command(const QString &name) {
         emit panelRequested(1);
     else if (name == "problems")
         emit panelRequested(2);
+    else if (name == "packages")
+        emit panelRequested(3);
     else if (name == "console")
         emit panelRequested(0);
     else
@@ -973,4 +1023,71 @@ void AppController::setEditorHotkey(const QString &name, const QString &sequence
     auto map = config.values["editor.hotkeys"].toMap();
     map[name] = sequence;
     setSetting("editor.hotkeys", map);
+}
+
+QVariantList AppController::backgroundTasks() const {
+    QVariantList result;
+    for (auto it = tasks.cbegin(); it != tasks.cend(); ++it)
+        result.append(it.value());
+    return result;
+}
+int AppController::overallProgress() const {
+    if (tasks.isEmpty()) return 100;
+    int total = 0;
+    for (const auto &task : tasks)
+        total += qBound(0, task.value("progress").toInt(), 100);
+    return total / tasks.size();
+}
+QString AppController::taskSummary() const {
+    if (tasks.isEmpty()) return QStringLiteral("Готово");
+    const auto task = tasks.cbegin().value();
+    return tasks.size() == 1 ? task.value("detail").toString()
+                             : QStringLiteral("Фоновые задачи: %1").arg(tasks.size());
+}
+void AppController::beginTask(const QString &id, const QString &title, const QString &detail, int progress) {
+    tasks[id] = QVariantMap{{"id", id}, {"title", title}, {"detail", detail}, {"progress", progress},
+                            {"startedMs", QDateTime::currentMSecsSinceEpoch()}};
+    Log::write("TASK", QString("%1 started; progress=%2; %3").arg(id).arg(progress).arg(detail));
+    emit tasksChanged();
+}
+void AppController::updateTask(const QString &id, const QString &detail, int progress) {
+    if (!tasks.contains(id)) return;
+    tasks[id]["detail"] = detail;
+    tasks[id]["progress"] = progress;
+    Log::write("TASK", QString("%1 progress=%2; %3").arg(id).arg(progress).arg(detail));
+    emit tasksChanged();
+}
+void AppController::finishTask(const QString &id, const QString &detail) {
+    if (!tasks.contains(id)) return;
+    tasks[id]["progress"] = 100;
+    if (!detail.isEmpty()) tasks[id]["detail"] = detail;
+    const auto elapsed = QDateTime::currentMSecsSinceEpoch() - tasks[id].value("startedMs").toLongLong();
+    Log::write("TASK", QString("%1 finished; elapsedMs=%2; %3").arg(id).arg(elapsed).arg(tasks[id].value("detail").toString()));
+    emit tasksChanged();
+    QTimer::singleShot(900, this, [this, id] {
+        if (tasks.value(id).value("progress").toInt() == 100) {
+            tasks.remove(id);
+            emit tasksChanged();
+        }
+    });
+}
+void AppController::writeAutoSnapshot() {
+    QVariantMap state{{"page", currentPage},
+                      {"project", project},
+                      {"activeFile", docs.active},
+                      {"openTabs", docs.order},
+                      {"dirtyDocuments", docs.anyDirty()},
+                      {"python", pythonPath()},
+                      {"runTarget", target},
+                      {"running", runner.running()},
+                      {"teacherRole", teacherSession.property("role")},
+                      {"teacherStatus", teacherSession.property("status")},
+                      {"teacherStudents", teacherSession.students()},
+                      {"problems", currentProblems.size()},
+                      {"packagesBusy", packageManager.busy()},
+                      {"aiBusy", assistant.busy()},
+                      {"tasks", backgroundTasks()},
+                      {"status", currentStatus}};
+    Log::writeSnapshot(QString::fromUtf8(QJsonDocument::fromVariant(state).toJson(QJsonDocument::Indented)));
+    Log::write("SNAPSHOT", "AutoEDI.log updated");
 }

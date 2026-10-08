@@ -52,8 +52,12 @@ class TeacherTests : public QObject {
         QTRY_COMPARE(student.property("remoteText").toString(), QString("next teacher file"));
         host.kick(id);
         QTRY_COMPARE(student.property("role").toString(), QString("idle"));
+        QVERIFY(student.property("canReconnect").toBool());
         QTRY_COMPARE(host.students().size(), 1);
         QVERIFY(host.property("selected").toString().isEmpty());
+        student.reconnect();
+        QTRY_COMPARE(student.property("role").toString(), QString("student"));
+        QTRY_COMPARE(host.students().size(), 2);
         host.stop();
         QTRY_COMPARE(second.property("role").toString(), QString("idle"));
         QCOMPARE(host.property("port").toInt(), 0);

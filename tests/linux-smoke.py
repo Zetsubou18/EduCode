@@ -3,7 +3,7 @@ import json, os, shutil, socket, subprocess, tempfile, time
 from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 binary=Path(shutil.which('EduCode') or root/'out/build/linux-release/EduCode/EduCode')
-assert subprocess.check_output([str(binary),'--version'],text=True).strip()=='EduCode 0.2.0'
+assert subprocess.check_output([str(binary),'--version'],text=True).strip()=='EduCode 0.3.0'
 assert 'Usage:' in subprocess.check_output([str(binary),'--help'],text=True)
 assert subprocess.run([str(binary),'/definitely/missing/educode.py'],capture_output=True).returncode==2
 print('PASS CLI help/version/missing path',flush=True)

@@ -1,7 +1,6 @@
 #include "AiAssistant.h"
 #include "core/Log.h"
 #include <QTimer>
-#include <QNetworkProxy>
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
@@ -16,7 +15,6 @@
 #include <QStandardPaths>
 #include <QUuid>
 AiAssistant::AiAssistant(QObject *parent) : QObject(parent) {
-    network.setProxy(QNetworkProxy::NoProxy);
     auto environment = QProcessEnvironment::systemEnvironment();
     environment.insert("PYTHONIOENCODING", "utf-8");
     environment.insert("PYTHONUTF8", "1");
@@ -142,7 +140,7 @@ void AiAssistant::deleteChat(const QString &id) {
     }
 }
 void AiAssistant::probe() {
-    if (settings.value("ai.provider").toString() == "groq") {
+    if (settings.value("ai.provider").toString() == "gemini") {
         modelList.clear(); available = false; emit changed(); return;
     }
     const auto probeUrl = settings.value("ai.url");
@@ -150,7 +148,7 @@ void AiAssistant::probe() {
     auto reply = network.get(QNetworkRequest(QUrl(url)));
     QTimer::singleShot(5000, reply, [reply] { if (reply->isRunning()) reply->abort(); });
     connect(reply, &QNetworkReply::finished, this, [this, reply, probeUrl] {
-        if (settings.value("ai.provider").toString() == "groq" || settings.value("ai.url") != probeUrl) { reply->deleteLater(); return; }
+        if (settings.value("ai.provider").toString() == "gemini" || settings.value("ai.url") != probeUrl) { reply->deleteLater(); return; }
         modelList.clear();
         available = reply->error() == QNetworkReply::NoError;
         if (available) {
@@ -176,12 +174,18 @@ void AiAssistant::retry() {
     retrying = false;
 }
 void AiAssistant::send(const QString &text) {
-    const bool groq = settings.value("ai.provider").toString() == "groq";
-    const auto prompt = text.trimmed(), model = settings[groq ? "ai.groqModel" : "ai.model"].toString();
+    const bool gemini = settings.value("ai.provider").toString() == "gemini";
+    const auto prompt = text.trimmed();
+    auto model = settings[gemini ? "ai.geminiModel" : "ai.model"].toString().trimmed();
+    if (gemini && (model.isEmpty() || model.startsWith("openai/", Qt::CaseInsensitive) ||
+                   model.contains("gpt-oss", Qt::CaseInsensitive) ||
+                   model.startsWith("llama", Qt::CaseInsensitive) ||
+                   model.startsWith("meta-llama/", Qt::CaseInsensitive)))
+        model = "gemini-3.1-flash-lite";
     if (prompt.isEmpty() || busy())
         return;
-    if (groq && settings["ai.groqApiKey"].toString().trimmed().isEmpty()) { emit error("Укажите API-ключ Groq в настройках ИИ."); return; }
-    if (!groq && !available) {
+    if (gemini && settings["ai.geminiApiKey"].toString().trimmed().isEmpty()) { emit error("Укажите API-ключ Gemini в настройках ИИ."); return; }
+    if (!gemini && !available) {
         emit error("Ollama не найдена. Откройте настройки ИИ для установки.");
         return;
     }
@@ -220,16 +224,13 @@ void AiAssistant::send(const QString &text) {
         "прямой просьбы пользователя. Учитывай, что пользователь учится программированию.");
     Log::write("AI", "Request started: " + settings.value("ai.provider").toString() + " model=" + model);
     QVariantMap request{{"provider", settings["ai.provider"]},
-                        {"proxy", settings["network.proxy"]},
                         {"rateStateDir", QDir(QFileInfo(statePath).absolutePath()).filePath("ai-quota")},
-                        {"rateLimits", QVariantList{settings["ai.groqRPM"], settings["ai.groqRPD"], settings["ai.groqTPM"], settings["ai.groqTPD"]}},
-                        {"outputTokens", settings["ai.groqOutputTokens"]},
+                        {"outputTokens", settings["ai.geminiOutputTokens"]},
                         {"endpoint", endpoint},
                         {"model", model},
                         {"url", settings["ai.url"]},
                         {"system", system},
                         {"userPrompt", settings["ai.userPrompt"]},
-                        {"userMemory", settings["ai.userMemory"]},
                         {"factMemory", settings["ai.factMemory"]},
                         {"memoryLimit", settings["ai.chatMemoryLimit"]},
                         {"context", settings["ai.contextSize"]},
@@ -260,7 +261,7 @@ void AiAssistant::send(const QString &text) {
         return;
     }
     auto env = process.processEnvironment();
-    env.insert("EDUCODE_GROQ_API_KEY", groq ? settings["ai.groqApiKey"].toString() : QString());
+    env.insert("EDUCODE_GEMINI_API_KEY", gemini ? settings["ai.geminiApiKey"].toString() : QString());
     process.setProcessEnvironment(env);
     process.start(py, QStringList{helper, requestPath});
 }

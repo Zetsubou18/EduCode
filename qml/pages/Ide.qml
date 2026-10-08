@@ -13,10 +13,17 @@ Rectangle {
  Behavior on explorerExtent { NumberAnimation { duration: 180; easing.type: Easing.InOutCubic } }
  function toggleExplorer(){if(explorerOpen){savedExplorerWidth=explorer.width;explorerExtent=0;}else explorerExtent=Math.max(175,savedExplorerWidth);explorerOpen=!explorerOpen;}
  property int bottomTab: 0
+ property real bottomPanelExtent: 235
+ property real expandedBottomPanelExtent: 235
+ property bool bottomPanelCollapsed: false
  property bool terminalLoaded: false
  property string contextPath: ""
  property var pluginMenuItems: {var rows=[];backend.plugins.forEach(function(p){if(p.enabled)(p.contextMenu||[]).forEach(function(item){rows.push({label:item.label,command:item.command,id:p.id});});});return rows;}
  signal fileActionRequested(string operation,string path)
+ Behavior on bottomPanelExtent { NumberAnimation { duration: 180; easing.type: Easing.InOutCubic } }
+ Timer { id: bottomPanelTransition; interval: 210 }
+ function toggleBottomPanel(){bottomPanelTransition.restart();if(bottomPanelCollapsed){bottomPanelExtent=Math.max(120,expandedBottomPanelExtent);bottomPanelCollapsed=false;}else{expandedBottomPanelExtent=Math.max(120,bottomPanel.height);bottomPanelExtent=40;bottomPanelCollapsed=true;}}
+ function showBottomPanel(index){bottomTab=index;if(index===1)terminalLoaded=true;if(bottomPanelCollapsed)toggleBottomPanel();}
  ColumnLayout {
   anchors.fill: parent; spacing: 0
   Rectangle {
@@ -26,7 +33,7 @@ Rectangle {
     C.ActionButton { glyph: "home"; subtle: true; hint: backend.translate("Главная",backend.configuration["general.language"]); onClicked: backend.home() }
     C.ActionButton { glyph: "folder"; subtle: true; hint: backend.translate("Скрыть / показать проводник",backend.configuration["general.language"]); onClicked: ide.toggleExplorer() }
     Rectangle { width: 1; height: 22; color: C.Theme.border }
-    C.ActionButton { glyph: "back"; subtle: true; hint: backend.translate("Назад к позиции · Alt+←",backend.configuration["general.language"]); onClicked: backend.navigateBack() }
+     C.ActionButton { glyph: "save"; subtle: true; hint: backend.translate("Сохранить всё · Ctrl+Shift+S",backend.configuration["general.language"]); onClicked: backend.saveAll() }
     Item { Layout.fillWidth: true }
     Text { text: backend.projectName; color: C.Theme.text; font.pixelSize: 14; font.weight: Font.Medium }
     Item { Layout.fillWidth: true }
@@ -36,7 +43,7 @@ Rectangle {
      currentIndex: {for(var i=0;i<model.length;i++)if(model[i].path===backend.runTarget)return i;return 0;}
      onActivated: backend.setRunTarget(model[index].path)
     }
-    C.ActionButton { glyph: backend.running ? "stop" : "play"; ink: backend.running ? C.Theme.error : C.Theme.green; subtle: true; hint: backend.running ? "Остановить" : "Запустить · F5"; onClicked: { if(backend.running)backend.stop();else {ide.bottomTab=0;backend.run();} } }
+     C.ActionButton { glyph: backend.running ? "stop" : "play"; ink: backend.running ? C.Theme.error : C.Theme.green; subtle: true; hint: backend.running ? "Остановить" : "Запустить · F5"; onClicked: { if(backend.running)backend.stop();else {ide.showBottomPanel(0);backend.run();} } }
     C.ActionButton { glyph: "search"; subtle: true; hint: backend.translate("Поиск в проекте и библиотеках · Ctrl+P",backend.configuration["general.language"]); onClicked: backend.command("quickOpen") }
     C.ActionButton { glyph: "file"; subtle: true; hint: backend.translate("Разделить редактор · Ctrl+Alt+S",backend.configuration["general.language"]); onClicked: backend.command("split") }
     C.ActionButton { glyph: "settings"; subtle: true; hint: backend.translate("Настройки",backend.configuration["general.language"]); onClicked: backend.settings() }
@@ -123,7 +130,9 @@ Rectangle {
      }
     }
     Rectangle {
-     SplitView.preferredHeight: 235; SplitView.minimumHeight: 70; color: C.Theme.background
+     id: bottomPanel
+     SplitView.preferredHeight: ide.bottomPanelExtent; SplitView.minimumHeight: 40; color: C.Theme.background; clip: true
+     onHeightChanged: if(!bottomPanelTransition.running&&Math.abs(height-ide.bottomPanelExtent)>2){ide.bottomPanelExtent=height;if(height>44){ide.bottomPanelCollapsed=false;ide.expandedBottomPanelExtent=height;}}
      ColumnLayout {
       anchors.fill: parent; spacing: 0
       Rectangle {
@@ -131,11 +140,11 @@ Rectangle {
        RowLayout {
         anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12; spacing: 4
         Repeater { model: [{label:"Консоль Python",icon:"console"},{label:"Терминал",icon:"terminal"},{label:"Проблемы",icon:"problems"},{label:"Библиотеки",icon:"packages"}].map(function(item){item.label=backend.translate(item.label,backend.configuration["general.language"]);return item;})
-         C.ActionButton { text: modelData.label+(index===2&&backend.problems.length>0 ? "  "+backend.problems.length : ""); glyph: modelData.icon; subtle: true; ink: ide.bottomTab===index ? C.Theme.text : C.Theme.faint; implicitHeight: 30; onClicked: {ide.bottomTab=index;if(index===1)ide.terminalLoaded=true;} }
+          C.ActionButton { text: modelData.label+(index===2&&backend.problems.length>0 ? "  "+backend.problems.length : ""); glyph: modelData.icon; subtle: true; ink: ide.bottomTab===index ? C.Theme.text : C.Theme.faint; implicitHeight: 30; onClicked: ide.showBottomPanel(index) }
         }
         Item { Layout.fillWidth: true }
         C.ActionButton { visible: backend.configuration["ai.askButtons"]&&(ide.bottomTab===2&&backend.problems.length>0||ide.bottomTab===0&&backend.consoleHasError); text: backend.translate("Спросить Лиру",backend.configuration["general.language"]); glyph: "ai"; implicitHeight: 30; onClicked: backend.askAi(ide.bottomTab===2 ? "Разбери текущие проблемы редактора, найди причину и предложи или внеси исправление." : "В консоли Python появилась ошибка. Прочитай консоль и связанный код, найди причину и исправь её.") }
-        C.ActionButton { glyph: "save"; implicitHeight: 30; implicitWidth: 30; subtle: true; hint: backend.translate("Сохранить всё · Ctrl+Shift+S",backend.configuration["general.language"]); onClicked: backend.saveAll() }
+         C.ActionButton { glyph: "down"; implicitHeight: 30; implicitWidth: 30; subtle: true; hint: backend.translate(ide.bottomPanelCollapsed ? "Развернуть нижнюю панель" : "Свернуть нижнюю панель",backend.configuration["general.language"]); onClicked: ide.toggleBottomPanel() }
        }
       }
       Item {
@@ -146,12 +155,13 @@ Rectangle {
         anchors.fill: parent; anchors.margins: 12; visible: ide.bottomTab===2; model: backend.problems; clip: true
         delegate: Rectangle {
          width: ListView.view.width; height: 36; radius: 4; color: problemMouse.containsMouse ? C.Theme.hover : "transparent"
-         RowLayout { anchors.fill: parent; anchors.margins: 8; spacing: 12
+         RowLayout { anchors.fill: parent; anchors.margins: 8; spacing: 12; z: 1
           Text { text: modelData.severity===1 ? "●" : "▲"; color: modelData.severity===1 ? C.Theme.error : "#d2b080"; font.pixelSize: 12 }
-          Text { text: modelData.message; color: C.Theme.text; font.pixelSize: 12; Layout.fillWidth: true; elide: Text.ElideRight }
-          Text { text: modelData.path.split("/").pop()+":"+modelData.line+":"+modelData.column; color: C.Theme.faint; font.pixelSize: 11 }
+           Text { text: modelData.message; color: C.Theme.text; font.pixelSize: 12; Layout.fillWidth: true; elide: Text.ElideRight }
+           Text { text: modelData.path.split("/").pop()+":"+modelData.line+":"+modelData.column; color: C.Theme.faint; font.pixelSize: 11 }
+           C.ActionButton { glyph: "copy"; subtle: true; implicitWidth: 26; implicitHeight: 26; hint: backend.translate("Копировать",backend.configuration["general.language"]); onClicked: backend.copyText(modelData.message) }
          }
-         MouseArea { id: problemMouse; anchors.fill: parent; hoverEnabled: true; onDoubleClicked: backend.openFile(modelData.path,modelData.line,modelData.column) }
+         MouseArea { id: problemMouse; anchors.fill: parent; hoverEnabled: true; z: 0; onDoubleClicked: backend.openFile(modelData.path,modelData.line,modelData.column) }
         }
         Text { anchors.centerIn: parent; text: backend.translate("Проблем в текущем файле не найдено",backend.configuration["general.language"]); color: C.Theme.faint; visible: backend.problems.length===0; font.pixelSize: 12 }
         ScrollBar.vertical: ScrollBar {}
@@ -165,11 +175,50 @@ Rectangle {
   }
   Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 26; color: "#232427"
    RowLayout { anchors.fill: parent; anchors.leftMargin: 14; anchors.rightMargin: 14
-    Text { text: backend.status; color: C.Theme.muted; font.pixelSize: 10 }
     Item { Layout.fillWidth: true }
-    Text { text: "UTF-8     Python · .venv"; color: C.Theme.faint; font.pixelSize: 10 }
+    Rectangle {
+     Layout.preferredWidth: backend.backgroundTasks.length>0 ? 270 : 88; Layout.preferredHeight: 22; radius: 4; color: taskMouse.containsMouse ? C.Theme.hover : "transparent"
+     RowLayout { anchors.fill: parent; anchors.leftMargin: 7; anchors.rightMargin: 7; spacing: 8
+      Text { Layout.fillWidth: true; text: backend.backgroundTasks.length>0 ? backend.taskSummary : "Готово"; color: backend.backgroundTasks.length>0 ? C.Theme.muted : C.Theme.faint; font.pixelSize: 10; elide: Text.ElideRight }
+      ProgressBar {
+       visible: backend.backgroundTasks.length>0; Layout.preferredWidth: 92; Layout.preferredHeight: 5; from: 0; to: 100; value: backend.overallProgress
+       background: Rectangle { implicitHeight: 3; radius: 2; color: C.Theme.border }
+       contentItem: Item { implicitHeight: 3; Rectangle { width: parent.width*parent.parent.visualPosition; height: 3; radius: 2; color: C.Theme.accent } }
+      }
+      Text { visible: backend.backgroundTasks.length>0; text: backend.backgroundTasks.length>1 ? backend.backgroundTasks.length : ""; color: C.Theme.faint; font.pixelSize: 9 }
+     }
+      MouseArea { id: taskMouse; anchors.fill: parent; hoverEnabled: true; onClicked: { if(taskPopup.opened) taskPopup.close(); else if(backend.backgroundTasks.length>0) taskPopup.open(); } }
+    }
    }
   }
+  Popup {
+   id: taskPopup
+   x: Math.max(8,ide.width-width-12)
+   y: Math.max(8,ide.height-height-32)
+   width: Math.min(430,ide.width-16)
+   height: Math.min(Math.max(112,58+taskList.contentHeight),Math.max(112,ide.height-52))
+   padding: 12
+   closePolicy: Popup.CloseOnEscape|Popup.CloseOnPressOutside
+   transformOrigin: Item.BottomRight
+   enter: Transition { ParallelAnimation { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 150; easing.type: Easing.OutCubic } NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: 170; easing.type: Easing.OutCubic } } }
+   exit: Transition { ParallelAnimation { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 110; easing.type: Easing.InCubic } NumberAnimation { property: "scale"; from: 1; to: 0.98; duration: 110; easing.type: Easing.InCubic } } }
+   Behavior on height { NumberAnimation { duration: 160; easing.type: Easing.InOutCubic } }
+   background: Rectangle { color: C.Theme.surface; border.color: C.Theme.border; radius: 8 }
+   contentItem: ColumnLayout {
+     spacing: 10
+     RowLayout { Layout.fillWidth: true; Text { text: "Фоновые задачи"; color: C.Theme.text; font.pixelSize: 14; font.weight: Font.DemiBold; Layout.fillWidth: true } C.ActionButton { glyph: "close"; subtle: true; implicitWidth: 26; implicitHeight: 26; onClicked: taskPopup.close() } }
+     ListView {
+      id: taskList; Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: 10; model: backend.backgroundTasks
+      delegate: ColumnLayout { width: taskList.width-(taskList.ScrollBar.vertical.visible ? 8 : 0); height: 62; spacing: 4
+       RowLayout { Layout.fillWidth: true; Text { text: modelData.title||"Задача"; color: C.Theme.text; font.pixelSize: 12; Layout.fillWidth: true; elide: Text.ElideRight } Text { text: (modelData.progress||0)+"%"; color: C.Theme.faint; font.pixelSize: 10 } }
+       ProgressBar { Layout.fillWidth: true; from:0; to:100; value:modelData.progress||0; background: Rectangle { implicitHeight:4; radius:2; color:C.Theme.border } contentItem: Item { implicitHeight:4; Rectangle { width:parent.width*parent.parent.visualPosition; height:4; radius:2; color:C.Theme.accent } } }
+       Text { text: modelData.detail||""; color: C.Theme.muted; font.pixelSize: 10; Layout.fillWidth: true; elide: Text.ElideRight }
+      }
+      ScrollBar.vertical: ScrollBar { policy: taskList.contentHeight>taskList.height ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff }
+     }
+    }
+   }
+   Connections { target: backend; function onTasksChanged(){ if(backend.backgroundTasks.length===0&&taskPopup.opened)taskPopup.close(); } }
  }
  Menu {
   id: fileMenu
@@ -201,5 +250,5 @@ Rectangle {
     ide.teacherExpandedExplorer=false;
    }
  } }
- Connections { target: backend; function onStateChanged(){if(backend.running)ide.bottomTab=0;} function onEditorCommand(name){if(name==="toggleExplorer")ide.toggleExplorer();} function onPanelRequested(index){ide.bottomTab=index;if(index===1)ide.terminalLoaded=true;} }
+ Connections { target: backend; function onStateChanged(){if(backend.running)ide.bottomTab=0;} function onEditorCommand(name){if(name==="toggleExplorer")ide.toggleExplorer();} function onPanelRequested(index){ide.showBottomPanel(index);} }
 }

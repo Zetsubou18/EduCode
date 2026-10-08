@@ -36,6 +36,15 @@ class CoreTests : public QObject {
         file.write(QJsonDocument::fromVariant(data).toJson());
         file.close();
         QTRY_COMPARE_WITH_TIMEOUT(config.values["terminal.fontSize"].toInt(), 19, 3000);
+        data["ai.provider"] = "gemini";
+        data["ai.geminiModel"] = "openai/gpt-oss-120b";
+        data["ai.geminiApiKey"] = "gsk_not_a_gemini_key";
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QJsonDocument::fromVariant(data).toJson());
+        file.close();
+        config.reload();
+        QCOMPARE(config.values["ai.geminiModel"].toString(), QString("gemini-3.1-flash-lite"));
+        QCOMPARE(config.values["ai.geminiApiKey"].toString(), QString());
     }
     void contentSearchAndUnsavedBuffers() {
         const auto python = qEnvironmentVariable("EDUCODE_TEST_PYTHON");

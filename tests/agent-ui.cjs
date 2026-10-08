@@ -12,7 +12,7 @@ async function main(){
  await editor.eval('host.packages.search("requests");true');await editor.wait('!host.packages.busy&&host.packages.items.some(p=>p.name.toLowerCase()==="requests")',240);
  await editor.eval('host.packages.select("requests");true');await editor.wait('!host.packages.busy&&host.packages.details.name&&host.packages.details.name.toLowerCase()==="requests"',240);
  assert((await editor.eval('host.packages.details.summary')).length>0);console.log('PASS PyPI search and metadata');
- await editor.eval('host.packages.search("");host.packages.install("colorama");true');await editor.wait('!host.packages.busy&&host.packages.items.some(p=>p.name.toLowerCase()==="colorama"&&p.installed)',240);console.log('PASS package install');
+ await editor.eval('host.packages.search("");host.packages.install("colorama","");true');await editor.wait('!host.packages.busy&&host.packages.items.some(p=>p.name.toLowerCase()==="colorama"&&p.installed)',240);console.log('PASS package install');
  await editor.eval('host.packages.remove("colorama");true');await editor.wait('!host.packages.busy&&!host.packages.items.some(p=>p.name.toLowerCase()==="colorama"&&p.installed)',240);console.log('PASS package remove');
  await editor.eval('host.setSetting("ai.model","qwen2.5:7b");true');await editor.wait('host.ai.ollamaAvailable&&host.ai.models.some(m=>m.name==="qwen2.5:7b")');
  await editor.eval('host.ai.send("Ответь одним коротким предложением: как тебя зовут и где ты работаешь? Не используй инструменты.");true');

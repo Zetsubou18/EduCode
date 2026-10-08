@@ -28,7 +28,7 @@ class PackageManager : public QObject {
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void search(const QString &query);
     Q_INVOKABLE void select(const QString &name);
-    Q_INVOKABLE void install(const QString &name);
+    Q_INVOKABLE void install(const QString &name, const QString &version);
     Q_INVOKABLE void installRequirements(const QString &path);
     Q_INVOKABLE void update(const QString &name);
     Q_INVOKABLE void remove(const QString &name);
@@ -38,11 +38,12 @@ class PackageManager : public QObject {
     void packagesChanged();
 
   private:
-    QString python, helper, operation, selected, currentStatus;
+    QString python, helper, operation, operationArgument, selected, currentStatus;
     QVariantList packageItems, installed;
     QVariantMap packageDetails;
     QProcess process;
     QTimer searchTimer;
     QString pendingQuery;
     void start(const QString &action, const QString &argument = QString());
+    void continuePendingSearch();
 };

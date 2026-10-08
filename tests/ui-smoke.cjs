@@ -1,16 +1,17 @@
 // Actual Qt WebEngine integration tests; CDP listens on localhost only during this test.
 const {spawn,spawnSync}=require('child_process');
 const fs=require('fs'),path=require('path'),assert=require('assert');
-const root=path.resolve(__dirname,'..'),bundle=process.env.EDUCODE_TEST_BUNDLE||path.join(root,'out/build/educode-qt5-release/EduCode');
+const root=path.resolve(__dirname,'..'),linux=process.platform==='linux',bundle=process.env.EDUCODE_TEST_BUNDLE||path.join(root,'out/build',linux?'linux-release':'educode-qt5-release','EduCode');
 const project=path.join(root,'.runtime/smoke-project'),file=path.join(project,'main.py');
+fs.mkdirSync(project,{recursive:true});
 const source="import math\n\ndef greet(name: str) -> str:\n    return f'Привет, {name}!'\n\nname = input('Имя: ')\nprint(greet(name))\nprint(math.sqrt(16))\n";
 fs.writeFileSync(file,source);fs.writeFileSync(path.join(project,'second.py'),'value = 42\n');
 const floodFile=path.join(project,'output.py');fs.writeFileSync(floodFile,"for i in range(100000):\n    print(f'{i}: console output performance check')\nprint('FLOOD_DONE')\n");
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-const app=spawn(path.join(bundle,'EduCode.exe'),[project],{windowsHide:true,env:{...process.env,EDUCODE_TEST_MODE:'1',QT_OPENGL:'software',QTWEBENGINE_REMOTE_DEBUGGING:'9237',EDUCODE_LOG:path.join(root,'out/ui-smoke-final.log'),EDUCODE_SCREENSHOT:path.join(root,'out/verified-ide.png'),EDUCODE_SCREENSHOT_DELAY:'30000'}});
+const app=spawn(path.join(bundle,linux?'EduCode':'EduCode.exe'),[project],{windowsHide:true,env:{...process.env,EDUCODE_TEST_MODE:'1',QT_OPENGL:'software',QTWEBENGINE_REMOTE_DEBUGGING:'9237',EDUCODE_LOG:path.join(root,'out/ui-smoke-final.log'),EDUCODE_SCREENSHOT:path.join(root,'out/verified-ide.png'),EDUCODE_SCREENSHOT_DELAY:'30000'}});
 let exited=false;const exit=new Promise(resolve=>app.on('exit',code=>{exited=true;resolve(code);}));
 class Client {
- constructor(url){this.ws=new WebSocket(url);this.seq=0;this.pending=new Map();this.connected=new Promise((res,rej)=>{this.ws.onopen=res;this.ws.onerror=rej;});this.ws.onmessage=e=>{const msg=JSON.parse(e.data);if(this.pending.has(msg.id)){const {res,rej}=this.pending.get(msg.id);this.pending.delete(msg.id);msg.error?rej(new Error(JSON.stringify(msg.error))):res(msg.result);}};}
+ constructor(url){const Socket=global.WebSocket||require('undici').WebSocket;this.ws=new Socket(url);this.seq=0;this.pending=new Map();this.connected=new Promise((res,rej)=>{this.ws.onopen=res;this.ws.onerror=rej;});this.ws.onmessage=e=>{const msg=JSON.parse(e.data);if(this.pending.has(msg.id)){const {res,rej}=this.pending.get(msg.id);this.pending.delete(msg.id);msg.error?rej(new Error(JSON.stringify(msg.error))):res(msg.result);}};}
  async command(method,params={}){await this.connected;return new Promise((res,rej)=>{const id=++this.seq;const timer=setTimeout(()=>rej(new Error('CDP timeout: '+method)),10000);this.pending.set(id,{res:v=>{clearTimeout(timer);res(v);},rej:e=>{clearTimeout(timer);rej(e);}});this.ws.send(JSON.stringify({id,method,params}));});}
  async eval(expression){const r=await this.command('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw new Error(JSON.stringify(r.exceptionDetails));return r.result.value;}
  async wait(expression){for(let i=0;i<50;i++){if(await this.eval(expression))return;await sleep(150);}throw new Error('Timed out: '+expression);}
@@ -23,6 +24,26 @@ async function main(){
  const editor=await connect('editor.html');
  await editor.wait('typeof editor!=="undefined"&&editor&&typeof host!=="undefined"&&host&&serverReady&&!!editor.getModel()&&innerWidth>100');
  assert((await editor.eval('editor.getModel().getValue()')).includes('greet'));
+ await editor.eval('editor.getModel().setValue("alpha\\nbeta");editor.setPosition({lineNumber:1,column:1});editor.focus();true');
+ await editor.eval('document.querySelector(".inputarea").dispatchEvent(new KeyboardEvent("keydown",{key:"Tab",code:"Tab",keyCode:9,which:9,bubbles:true}));true');
+ assert.equal(await editor.eval('editor.getModel().getLineContent(1)'), '    alpha');
+ await editor.eval('document.querySelector(".inputarea").dispatchEvent(new KeyboardEvent("keydown",{key:"Tab",code:"Tab",keyCode:9,which:9,shiftKey:true,bubbles:true}));true');
+ assert.equal(await editor.eval('editor.getModel().getLineContent(1)'), 'alpha');
+ await editor.eval('editor.setSelection(new monaco.Selection(1,1,1,6));editor.focus();true');
+ await editor.eval('document.querySelector(".inputarea").dispatchEvent(new KeyboardEvent("keydown",{key:"Backspace",code:"Backspace",keyCode:8,which:8,bubbles:true}));true');
+ assert.equal(await editor.eval('editor.getModel().getLineContent(1)'), '');
+ await editor.eval('editor.setPosition({lineNumber:2,column:1});editor.focus();true');
+ await editor.eval('document.querySelector(".inputarea").dispatchEvent(new KeyboardEvent("keydown",{key:"Backspace",code:"Backspace",keyCode:8,which:8,bubbles:true}));true');
+ assert.equal(await editor.eval('editor.getModel().getValue()'), 'beta');
+ await editor.eval('editor.getModel().setValue('+JSON.stringify(source)+');flushChange();true');
+ console.log('PASS Tab/Shift+Tab, selection deletion and line join');
+ const paletteSource='@decorator(param=1)\ndef paint(self, value: int):\n    """Doc @param value"""\n    print(value, sep=" ")\n    return self.__class__, b"bytes"\n';
+ await editor.eval('editor.getModel().setValue('+JSON.stringify(paletteSource)+');updateFStringDecorations();true');
+ const paletteClasses=await editor.eval('editor.getModel().getAllDecorations().map(item=>item.options.inlineClassName).filter(Boolean)');
+ for(const expected of ['py-decorator','py-function-declaration','py-self','py-builtin','py-named-argument','py-special-name','py-binary-string','py-docstring','py-doc-tag'])assert(paletteClasses.includes(expected),expected+' decoration is missing');
+ assert(await editor.eval('pyCharmWidgetStyles.textContent.includes(".py-function-declaration{color:#56a8f5")&&pyCharmWidgetStyles.textContent.includes(".py-builtin{color:#8888c6")&&pyCharmWidgetStyles.textContent.includes(".py-self{color:#94558d")'));
+ await editor.eval('editor.getModel().setValue('+JSON.stringify(source)+');updateFStringDecorations();flushChange();true');
+ console.log('PASS PyCharm syntax palette decorations');
  const completion=await editor.eval('request("textDocument/completion",{textDocument:{uri:uri(activePath)},position:{line:7,character:10}})');
  assert((completion.items||completion).some(i=>i.label==='math'));console.log('PASS autocomplete');
  const hover=await editor.eval('request("textDocument/hover",{textDocument:{uri:uri(activePath)},position:{line:6,character:8}})');assert(hover.contents.value.includes('greet'));console.log('PASS hover/signature');
@@ -30,6 +51,8 @@ async function main(){
  const tabCount=(await editor.eval('host.tabs')).length;
  await editor.eval('editor.setPosition({lineNumber:7,column:9});editor.getAction("editor.action.revealDefinition").run()');
  await editor.wait('editor.getPosition().lineNumber===3');assert.equal((await editor.eval('host.tabs')).length,tabCount);await editor.eval('host.navigateBack();true');await editor.wait('editor.getPosition().lineNumber===7');console.log('PASS definition and navigation history');
+ await editor.eval('showReferences({name:"greet",kind:"Function",position:{lineNumber:3,column:5},references:[{uri:uri(activePath),range:{startLineNumber:7,startColumn:7,endLineNumber:7,endColumn:12}}]});true');
+ await editor.wait('document.getElementById("referencesPopup").style.display==="block"');assert.equal(await editor.eval('document.querySelectorAll(".referenceItem").length'),1);assert.equal(await editor.eval('!!document.querySelector(".reference-zone-widget")'),false);await editor.eval('document.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true}));true');await editor.wait('document.getElementById("referencesPopup").style.display==="none"&&editor.getPosition().lineNumber===7');console.log('PASS compact references popup');
  const originalPath=await editor.eval('activePath');const modified=source+'\nundefined_symbol()\n';
  await editor.eval('editor.getModel().setValue('+JSON.stringify(modified)+');flushChange();true');
  await editor.wait('host.problems.some(p=>p.message.includes("undefined_symbol"))');assert((await editor.eval('monaco.editor.getModelMarkers({owner:"pyright"}).length'))>0);console.log('PASS diagnostics and Problems');
@@ -42,11 +65,11 @@ async function main(){
  await editor.eval('host.run();true');await consolePage.wait('host.running');await consolePage.wait(textBuffer+'.includes("Имя:")');
  await consolePage.eval('term.focus();true');await consolePage.command('Input.insertText',{text:'Тест'});await consolePage.eval('term.textarea.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",code:"Enter",keyCode:13,which:13,bubbles:true}));true');
  await consolePage.wait('!host.running');assert((await consolePage.eval(textBuffer)).includes('Привет, Тест!'));console.log('PASS real console keyboard input and Unicode');
- await editor.eval('host.command("terminal");true');const terminal=await connect('terminal.html');await terminal.wait('typeof host!=="undefined"&&host&&term.cols>10');await terminal.wait(textBuffer+'.includes(">")');
+ await editor.eval('host.command("terminal");true');const terminal=await connect('terminal.html');await terminal.wait('typeof host!=="undefined"&&host&&term.cols>10');await terminal.wait('('+textBuffer+'.includes(">")||'+textBuffer+'.includes("$"))');
  await terminal.eval('host.terminalInput('+JSON.stringify('python -c "import sys; print(\'PTY_OK\', sys.prefix)"\r')+');true');try{await terminal.wait(textBuffer+'.includes("PTY_OK")&&'+textBuffer+'.includes(".venv")');}catch(e){console.log('Terminal buffer:',await terminal.eval(textBuffer));throw e;}console.log('PASS PTY shell and project Python');
  const image=await terminal.command('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.join(root,'out/verified-terminal.png'),Buffer.from(image.data,'base64'));
  await editor.eval('host.command("console");true');
- let clock=Date.now();const native=spawnSync(path.join(project,'.venv/Scripts/python.exe'),['-u',floodFile],{windowsHide:true,maxBuffer:12*1024*1024});assert.equal(native.status,0);const nativeTime=Date.now()-clock;
+ let clock=Date.now();const native=spawnSync(path.join(project,linux?'.venv/bin/python':'.venv/Scripts/python.exe'),['-u',floodFile],{windowsHide:true,maxBuffer:12*1024*1024});assert.equal(native.status,0);const nativeTime=Date.now()-clock;
  await editor.eval('host.openFile('+JSON.stringify(floodFile)+');true');await editor.wait('activePath.endsWith("output.py")');clock=Date.now();await editor.eval('host.run();true');await consolePage.wait(textBuffer+'.includes("FLOOD_DONE")');const uiTime=Date.now()-clock;
  console.log('PASS 100000 lines through live console: native '+nativeTime+' ms; IDE display '+uiTime+' ms');assert(uiTime<nativeTime*3+1000);
  await editor.eval('host.openFile('+JSON.stringify(path.join(project,'second.py'))+');true');await editor.wait('activePath.endsWith("second.py")');await editor.eval('editor.getModel().setValue("import time\\nprint(\'RUNNING\',flush=True)\\ntime.sleep(60)\\n");host.run();true');await consolePage.wait('host.running');await consolePage.eval('host.stop();true');await consolePage.wait('!host.running');console.log('PASS stop running process');

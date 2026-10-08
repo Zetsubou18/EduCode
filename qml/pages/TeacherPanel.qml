@@ -14,12 +14,13 @@ ColumnLayout {
     readonly property int panelHeight: session.role === "teacher" ? 112 + rosterHeight
                                       : session.role === "student" ? 390
                                       : session.role === "connecting" ? 80
-                                      : session.status === "" ? 96 : 116
+                                      : session.status === "" ? 96 : session.canReconnect ? 154 : 116
     spacing: 6
 
     Text { text: "TEACHER MODE"; color: C.Theme.muted; font.pixelSize: 10; font.letterSpacing: 1.4 }
     C.ActionButton { Layout.fillWidth: true; visible: session.role === "idle"; text: "Создать конференцию"; onClicked: session.create() }
     C.ActionButton { Layout.fillWidth: true; visible: session.role === "idle"; text: "Подключиться"; onClicked: connectDialog.open() }
+    C.ActionButton { Layout.fillWidth: true; visible: session.canReconnect; text: "Переподключиться"; glyph: "refresh"; primary: true; onClicked: session.reconnect() }
     Text { Layout.fillWidth: true; visible: session.status !== ""; text: session.status; color: C.Theme.muted; font.pixelSize: 11; wrapMode: Text.Wrap }
     Text { visible: session.role === "teacher"; text: "Порт: " + session.port; color: C.Theme.text; font.pixelSize: 14 }
     C.ActionButton { Layout.fillWidth: true; visible: session.role === "teacher"; text: "Завершить"; glyph: "stop"; onClicked: session.stop() }

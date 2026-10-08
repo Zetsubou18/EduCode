@@ -1,11 +1,11 @@
-"""Restricted Ollama tool runner owned by EduCode. The model only sees declared IDE tools."""
-from ai_http import groq_request, build_opener
+"""Restricted Ollama/Gemini tool runner owned by EduCode. The model only sees declared IDE tools."""
+from ai_http import gemini_request, build_opener
 import urllib.error
 import html, ipaddress, json, os, re, socket, sys, urllib.parse, urllib.request
 
 def report_error(kind, error, traceback):
     message=str(error)
-    key=os.environ.get('EDUCODE_GROQ_API_KEY','')
+    key=os.environ.get('EDUCODE_GEMINI_API_KEY','')
     if key: message=message.replace(key,'[скрыто]')
     print(message[:1500], file=sys.stderr, flush=True)
 
@@ -22,7 +22,7 @@ def ide(method, params=None):
     with socket.create_connection(('127.0.0.1', control['port']), timeout=15) as client:
         client.sendall(json.dumps(payload, ensure_ascii=False).encode() + b'\n')
         raw = client.makefile('rb').readline(4 * 1024 * 1024)
-    key = os.environ.get('EDUCODE_GROQ_API_KEY', '')
+    key = os.environ.get('EDUCODE_GEMINI_API_KEY', '')
     if key: raw = raw.replace(key.encode(), b'[REDACTED]')
     reply = json.loads(raw)
     if not reply.get('ok'): raise RuntimeError(reply.get('error') or 'IDE отказала в операции')
@@ -32,7 +32,7 @@ def web_search(query):
     emit('status', text='Ищу в интернете…')
     url = 'https://html.duckduckgo.com/html/?q=' + urllib.parse.quote(query)
     req = urllib.request.Request(url, headers={'User-Agent':'Mozilla/5.0 EduCode/0.1'})
-    text = build_opener(request.get('proxy','')).open(req, timeout=15).read().decode('utf-8','replace')
+    text = build_opener().open(req, timeout=15).read().decode('utf-8','replace')
     found=[]
     for link,title in re.findall(r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', text):
         link=html.unescape(link); match=re.search(r'uddg=([^&]+)',link)
@@ -51,7 +51,7 @@ def web_fetch(url):
             raise RuntimeError('Локальные и служебные адреса недоступны веб-инструменту.')
     emit('status', text='Читаю страницу…')
     req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0 EduCode/0.1'})
-    raw=build_opener(request.get('proxy','')).open(req,timeout=15).read(600000).decode('utf-8','replace')
+    raw=build_opener().open(req,timeout=15).read(600000).decode('utf-8','replace')
     raw=re.sub(r'(?is)<(script|style).*?>.*?</\1>',' ',raw)
     return re.sub(r'\s+',' ',re.sub(r'<[^>]+>',' ',html.unescape(raw)))[:18000]
 
@@ -83,43 +83,42 @@ def execute(name,args):
 
 base=request.get('url','http://127.0.0.1:11434').rstrip('/')
 def ollama(messages, tools=None):
-    groq = request.get('provider') == 'groq'
+    gemini = request.get('provider') == 'gemini'
     body={'model':request['model'],'messages':messages,'stream':False}
-    headers={'Content-Type':'application/json','User-Agent':'EduCode/0.2 (Groq client)'}
+    headers={'Content-Type':'application/json','User-Agent':'EduCode/0.3'}
     if tools: body['tools']=tools
-    if groq:
+    if gemini:
         body['max_completion_tokens']=request.get('outputTokens',1024)
         try:
-            return groq_request(body,os.environ.get('EDUCODE_GROQ_API_KEY',''),request.get('proxy',''),
-                request['rateStateDir'],tuple(request.get('rateLimits',[30,1000,8000,200000])),
-                lambda text: emit('status',text=text))
+            return gemini_request(body,os.environ.get('EDUCODE_GEMINI_API_KEY',''),
+                                  lambda text: emit('status',text=text))
         except urllib.error.HTTPError as error:
             raw=error.read(8192).decode('utf-8','replace')
             try: detail=json.loads(raw).get('error',{}).get('message','')
             except (ValueError, AttributeError): detail=''
             if '1010' in raw: detail='Сервис заблокировал HTTP-клиент. Проверьте версию EduCode.'
-            key=os.environ.get('EDUCODE_GROQ_API_KEY','')
+            key=os.environ.get('EDUCODE_GEMINI_API_KEY','')
             if key: detail=detail.replace(key,'[скрыто]')
             raise RuntimeError('ИИ HTTP '+str(error.code)+': '+(detail[:1000] or 'Проверьте ключ, модель и доступ к сервису.')) from None
         except (urllib.error.URLError, OSError) as error:
-            raise RuntimeError('Нет соединения с Groq. Проверьте прокси/VPN и доступ к сети.') from None
+            raise RuntimeError('Нет соединения с Gemini. Проверьте VPN и доступ к сети.') from None
     body['options']={'temperature':0.2,'num_ctx':request.get('context',8192)}
     url=base+'/api/chat'
     req=urllib.request.Request(url,data=json.dumps(body,ensure_ascii=False).encode(),headers=headers)
     try:
-        with urllib.request.urlopen(req,timeout=120 if groq else 600) as response:
+        with urllib.request.urlopen(req,timeout=120 if gemini else 600) as response:
             result=json.load(response)
     except urllib.error.HTTPError as error:
         if error.code == 429:
-            raise RuntimeError('Лимит Groq. Повторите через '+error.headers.get('retry-after','несколько')+' секунд.') from None
+            raise RuntimeError('Лимит Gemini. Повторите через '+error.headers.get('retry-after','несколько')+' секунд.') from None
         raw=error.read(8192).decode('utf-8','replace')
         try: detail=json.loads(raw).get('error',{}).get('message','')
         except (ValueError, AttributeError): detail=''
         if '1010' in raw: detail='Сервис заблокировал HTTP-клиент. Проверьте версию EduCode.'
-        key=os.environ.get('EDUCODE_GROQ_API_KEY','')
+        key=os.environ.get('EDUCODE_GEMINI_API_KEY','')
         if key: detail=detail.replace(key,'[скрыто]')
         raise RuntimeError('ИИ HTTP '+str(error.code)+': '+(detail[:1000] or 'Проверьте ключ, модель и доступ к сервису.')) from None
-    return result['choices'][0]['message'] if groq else result['message']
+    return result['choices'][0]['message'] if gemini else result['message']
 
 history=request.get('messages',[])
 limit=request.get('memoryLimit',24000)
@@ -132,7 +131,7 @@ if sum(len(m.get('content','')) for m in history)>limit and len(history)>6:
     history=history[-6:]
     emit('summary',text=summary)
 
-system=request['system']+'\nПамять чата: '+summary+'\nПамять о пользователе: '+json.dumps(request.get('userMemory',{}),ensure_ascii=False)+'\nРабочие факты: '+json.dumps(request.get('factMemory',{}),ensure_ascii=False)+'\nПользовательские инструкции: '+request.get('userPrompt','')
+system=request['system']+'\nПамять чата: '+summary+'\nРабочие факты: '+json.dumps(request.get('factMemory',{}),ensure_ascii=False)+'\nПользовательские инструкции: '+request.get('userPrompt','')
 messages=[{'role':'system','content':system}]+[{'role':m['role'],'content':m.get('content','')} for m in history]+[{'role':'user','content':request['prompt']}]
 emit('status',text='Думаю…')
 needs_tools=bool(re.search(r'уведом|notify|ошиб|консол|терминал|файл|код|проект|настрой|пакет|библиот|установ|удал|браузер|открой|найди|интернет|документ',request['prompt'],re.I))
@@ -160,6 +159,6 @@ for step in range(12):
         except Exception as error: result={'error':str(error)}
         emit('tool',name=name,arguments=args,result=result)
         message={'role':'tool','content':json.dumps(result,ensure_ascii=False)[:30000]}
-        if request.get('provider') == 'groq': message['tool_call_id']=call['id']
+        if request.get('provider') == 'gemini': message['tool_call_id']=call['id']
         messages.append(message)
 else: emit('answer',text='Достигнут лимит действий. Проверьте результат и продолжите новым сообщением.')

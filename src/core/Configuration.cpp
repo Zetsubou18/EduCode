@@ -28,21 +28,16 @@ QVariantMap Configuration::defaults() {
             {"console.output", "ide"},
             {"browser.homePage", "https://www.google.com"},
             {"notifications.delivery", "ide"},
+            {"updates.enabled", true},
             {"python.extraPaths", QStringList{}},
             {"ai.enabled", true},
-            {"network.proxy", ""},
-            {"ai.groqRPM", 30},
-            {"ai.groqRPD", 1000},
-            {"ai.groqTPM", 8000},
-            {"ai.groqTPD", 200000},
-            {"ai.groqOutputTokens", 1024},
-            {"ai.provider", "ollama"},
-            {"ai.groqApiKey", ""},
-            {"ai.groqModel", ""},
+            {"ai.geminiOutputTokens", 2048},
+            {"ai.provider", "gemini"},
+            {"ai.geminiApiKey", ""},
+            {"ai.geminiModel", "gemini-3.1-flash-lite"},
             {"ai.url", "http://127.0.0.1:11434"},
             {"ai.model", ""},
             {"ai.userPrompt", ""},
-            {"ai.userMemory", QVariantMap{}},
             {"ai.factMemory", QVariantMap{}},
             {"ai.chatMemoryLimit", 24000},
             {"ai.contextSize", 8192},
@@ -107,21 +102,13 @@ bool Configuration::validate(const QVariantMap &candidate, QString *error) const
         return fail("Память чата должна быть от 4000 до 100000 символов.");
     if (candidate["ai.contextSize"].toInt() < 2048 || candidate["ai.contextSize"].toInt() > 131072)
         return fail("Контекст модели должен быть от 2048 до 131072 токенов.");
-    if (!QStringList{"ollama", "groq"}.contains(candidate["ai.provider"].toString()))
+    if (!QStringList{"ollama", "gemini"}.contains(candidate["ai.provider"].toString()))
         return fail("Неизвестный провайдер ИИ.");
-    for (const auto &key : QStringList{"ai.groqRPM", "ai.groqRPD", "ai.groqTPM", "ai.groqTPD"})
-        if (candidate[key].toInt() < 1 || candidate[key].toInt() > 10000000)
-            return fail("Лимит Groq должен быть положительным: " + key);
-    if (candidate["ai.groqOutputTokens"].toInt() < 128 || candidate["ai.groqOutputTokens"].toInt() > 8192)
-        return fail("Лимит ответа должен быть от 128 до 8192 токенов.");
+    if (candidate["ai.geminiOutputTokens"].toInt() < 128 ||
+        candidate["ai.geminiOutputTokens"].toInt() > 65536)
+        return fail("Лимит ответа должен быть от 128 до 65536 токенов.");
     if (candidate["general.displayName"].toString().trimmed().isEmpty() || candidate["general.displayName"].toString().size() > 80)
         return fail("Имя должно содержать от 1 до 80 символов.");
-    const auto proxyText = candidate["network.proxy"].toString();
-    if (!proxyText.isEmpty()) {
-        const QUrl proxy(proxyText);
-        if (!proxy.isValid() || proxy.host().isEmpty() || !QStringList{"http", "socks5", "socks5h"}.contains(proxy.scheme()) || proxy.port() <= 0)
-            return fail("Прокси: http://host:port или socks5://host:port.");
-    }
     const QUrl aiUrl(candidate["ai.url"].toString());
     if (!aiUrl.isValid() || aiUrl.host().isEmpty() || !QStringList{"https", "http"}.contains(aiUrl.scheme()))
         return fail("Адрес Ollama должен быть URL http:// или https://.");
@@ -203,7 +190,36 @@ void Configuration::reload() {
         return;
     }
     auto candidate = defaults();
-    const auto data = doc.object().toVariantMap();
+    auto data = doc.object().toVariantMap();
+    data.remove("network.proxy");
+    if (data.contains("ai.userMemory")) {
+        auto facts = data.value("ai.factMemory").toMap();
+        const auto legacyMemory = data.value("ai.userMemory").toMap();
+        for (auto it = legacyMemory.begin(); it != legacyMemory.end(); ++it)
+            if (!facts.contains(it.key()))
+                facts.insert(it.key(), it.value());
+        data["ai.factMemory"] = facts;
+        data.remove("ai.userMemory");
+    }
+    // One-time migration from the removed Groq provider. Provider-specific keys and model ids
+    // are not transferable: carrying them into Gemini causes deterministic 401/404 failures.
+    if (data.value("ai.provider").toString() == "groq")
+        data["ai.provider"] = "gemini";
+    if (!data.contains("ai.geminiApiKey") && data.contains("ai.groqApiKey"))
+        data["ai.geminiApiKey"] = "";
+    if (!data.contains("ai.geminiModel") && data.contains("ai.groqModel"))
+        data["ai.geminiModel"] = "gemini-3.1-flash-lite";
+    if (!data.contains("ai.geminiOutputTokens") && data.contains("ai.groqOutputTokens"))
+        data["ai.geminiOutputTokens"] = data.value("ai.groqOutputTokens");
+    for (const auto &legacy : QStringList{"ai.groqApiKey", "ai.groqModel", "ai.groqOutputTokens",
+                                          "ai.groqRPM", "ai.groqRPD", "ai.groqTPM", "ai.groqTPD"})
+        data.remove(legacy);
+    const auto geminiModel = data.value("ai.geminiModel").toString().trimmed().toLower();
+    if (geminiModel.startsWith("openai/") || geminiModel.contains("gpt-oss") ||
+        geminiModel.startsWith("llama") || geminiModel.startsWith("meta-llama/"))
+        data["ai.geminiModel"] = "gemini-3.1-flash-lite";
+    if (data.value("ai.geminiApiKey").toString().startsWith("gsk_"))
+        data["ai.geminiApiKey"] = "";
     for (auto it = data.begin(); it != data.end(); ++it)
         candidate[it.key()] = it.value();
     auto bindings = Commands::defaultBindings();

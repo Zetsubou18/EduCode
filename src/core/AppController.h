@@ -13,6 +13,8 @@
 #include "projects/PythonEnvironment.h"
 #include "search/SearchService.h"
 #include <QObject>
+#include <QMap>
+#include <QNetworkAccessManager>
 #include <QSettings>
 #include <QSystemTrayIcon>
 #include <QVariantList>
@@ -47,6 +49,9 @@ class AppController : public QObject {
     Q_PROPERTY(QObject *ai READ ai CONSTANT)
     Q_PROPERTY(QObject *teacher READ teacher CONSTANT)
     Q_PROPERTY(bool consoleHasError READ consoleHasError NOTIFY stateChanged)
+    Q_PROPERTY(QVariantList backgroundTasks READ backgroundTasks NOTIFY tasksChanged)
+    Q_PROPERTY(int overallProgress READ overallProgress NOTIFY tasksChanged)
+    Q_PROPERTY(QString taskSummary READ taskSummary NOTIFY tasksChanged)
   public:
     TeacherSession *teacher() { return &teacherSession; }
     qint64 demoProcessId() const { return runner.processId(); }
@@ -66,6 +71,9 @@ class AppController : public QObject {
         return config.path;
     }
     QString logPath() const;
+    QVariantList backgroundTasks() const;
+    int overallProgress() const;
+    QString taskSummary() const;
     QVariantList notifications() const {
         return notificationHistory;
     }
@@ -225,11 +233,13 @@ class AppController : public QObject {
     void quitApproved();
     void environmentNeeded(const QString &path);
     void showQuickOpen();
+    void tasksChanged();
 
   private:
     Configuration config;
     ControlServer control;
     QSystemTrayIcon tray;
+    QNetworkAccessManager updateNetwork;
     QVariantList notificationHistory, actionCatalog;
     QVariantList pluginCatalog;
     int unread = 0;
@@ -252,6 +262,7 @@ class AppController : public QObject {
     bool editorConnected = false;
     QString consoleBuffer, terminalBuffer;
     bool hasConsoleError = false;
+    QMap<QString, QVariantMap> tasks;
     QString node() const;
     QString runtime(const QString &relative) const;
     void activate(int line = 0, int column = 0);
@@ -261,4 +272,9 @@ class AppController : public QObject {
     void performPending();
     bool guard(const QString &action, const QString &path = QString());
     QVariant pluginHost(const QStringList &args);
+    void beginTask(const QString &id, const QString &title, const QString &detail, int progress = 0);
+    void updateTask(const QString &id, const QString &detail, int progress);
+    void finishTask(const QString &id, const QString &detail = QString());
+    void writeAutoSnapshot();
+    void checkForUpdates();
 };

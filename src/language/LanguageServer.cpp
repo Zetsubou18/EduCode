@@ -98,6 +98,8 @@ void LanguageServer::handle(const QJsonObject &obj) {
                              {"typeCheckingMode", "basic"},
                              {"autoSearchPaths", true},
                              {"useLibraryCodeForTypes", true},
+                             {"diagnosticSeverityOverrides",
+                              QJsonObject{{"reportWildcardImportFromLibrary", "none"}}},
                              {"extraPaths", QJsonArray::fromStringList(QStringList{root} + extraPaths)}};
         QJsonObject settings{{"python", QJsonObject{{"pythonPath", python}, {"analysis", analysis}}}};
         send({{"jsonrpc", "2.0"},
@@ -120,6 +122,8 @@ void LanguageServer::handle(const QJsonObject &obj) {
                                            {"typeCheckingMode", "basic"},
                                            {"autoSearchPaths", true},
                                            {"useLibraryCodeForTypes", true},
+                                           {"diagnosticSeverityOverrides",
+                                            QJsonObject{{"reportWildcardImportFromLibrary", "none"}}},
                                            {"extraPaths", QJsonArray::fromStringList(QStringList{root} + extraPaths)}});
                 else
                     arr.append(QJsonObject{});
@@ -148,6 +152,8 @@ void LanguageServer::configure(const QStringList &paths) {
                                                                     {"typeCheckingMode", "basic"},
                                                                     {"autoSearchPaths", true},
                                                                     {"useLibraryCodeForTypes", true},
+                                                                    {"diagnosticSeverityOverrides",
+                                                                     QJsonObject{{"reportWildcardImportFromLibrary", "none"}}},
                                                                     {"extraPaths", QJsonArray::fromStringList(
                                                                                        QStringList{root} + extraPaths)}}}}}}}}}});
 }

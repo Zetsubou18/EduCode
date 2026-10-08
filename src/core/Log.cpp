@@ -10,9 +10,11 @@
 #include <QMutex>
 #include <QMutexLocker>
 #include <QStandardPaths>
+#include <QSaveFile>
 namespace {
 QMutex mutex;
 QString logPath;
+QString autoLogPath;
 QFile logFile;
 QStringList startupMessages;
 } // namespace
@@ -28,6 +30,16 @@ void Log::captureStartup() {
 }
 QString Log::path() {
     return logPath;
+}
+QString Log::snapshotPath() { return autoLogPath; }
+void Log::writeSnapshot(const QString &json) {
+    QMutexLocker lock(&mutex);
+    if (autoLogPath.isEmpty())
+        return;
+    QSaveFile file(autoLogPath);
+    const auto bytes = (QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs) + "\n" + json + "\n").toUtf8();
+    if (file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size())
+        file.commit();
 }
 void Log::write(const QString &category, const QString &message) {
     QMutexLocker lock(&mutex);
@@ -52,6 +64,7 @@ void Log::initialize() {
     const auto dir =
         QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath("logs");
     QDir().mkpath(dir);
+    autoLogPath = QDir(dir).filePath("AutoEDI.log");
     logPath = QDir(dir).filePath("ide-" + QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz")
         + "-" + QUuid::createUuid().toString(QUuid::WithoutBraces).left(8) + ".log");
     logFile.setFileName(logPath);

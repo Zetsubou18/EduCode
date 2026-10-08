@@ -1,15 +1,11 @@
-"""HTTP/SOCKS transport and persistent, conservative Groq quotas. No SDK required."""
+"""HTTP/SOCKS transport for Gemini's OpenAI-compatible endpoint. No SDK required."""
 import contextlib
 import hashlib
-import http.client
 import json
 import os
 import re
-import socket
-import ssl
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -22,57 +18,8 @@ def duration(value):
                    for n, unit in re.findall(r'([\d.]+)(ms|s|m|h|d)', str(value)))
 
 
-def socks_connect(proxy, host, port, timeout):
-    parsed = urllib.parse.urlsplit(proxy)
-    sock = socket.create_connection((parsed.hostname, parsed.port or 1080), timeout)
-    def read(count):
-        data = b''
-        while len(data) < count:
-            chunk = sock.recv(count-len(data))
-            if not chunk: raise OSError('SOCKS5: соединение закрыто прокси')
-            data += chunk
-        return data
-    try:
-        sock.sendall(b'\x05\x02\x00\x02' if parsed.username else b'\x05\x01\x00')
-        version, method = read(2)
-        if version != 5 or method not in (0, 2): raise OSError('SOCKS5: прокси отказал в подключении')
-        if method == 2:
-            user = urllib.parse.unquote(parsed.username or '').encode()
-            password = urllib.parse.unquote(parsed.password or '').encode()
-            if max(len(user), len(password)) > 255: raise OSError('SOCKS5: слишком длинные учётные данные')
-            sock.sendall(b'\x01'+bytes([len(user)])+user+bytes([len(password)])+password)
-            if read(2) != b'\x01\x00': raise OSError('SOCKS5: неверные учётные данные')
-        name = host.encode('idna')
-        if len(name) > 255: raise OSError('SOCKS5: неверное имя сервера')
-        # DNS is resolved on the proxy, avoiding local DNS routing/leaks.
-        sock.sendall(b'\x05\x01\x00\x03'+bytes([len(name)])+name+int(port).to_bytes(2,'big'))
-        version, result, _, address_type = read(4)
-        if version != 5 or result: raise OSError('SOCKS5: сервер недоступен, код '+str(result))
-        read({1: 4, 4: 16}.get(address_type, read(1)[0] if address_type == 3 else 0))
-        read(2)
-        return sock
-    except BaseException:
-        sock.close()
-        raise
-
-
-def build_opener(proxy=''):
-    if not proxy:
-        return urllib.request.build_opener()  # Respect standard system HTTP(S) proxy variables.
-    if proxy.startswith(('socks5://', 'socks5h://')):
-        class Connection(http.client.HTTPConnection):
-            def connect(self): self.sock = socks_connect(proxy, self.host, self.port, self.timeout)
-        class SecureConnection(http.client.HTTPSConnection):
-            def connect(self):
-                sock = socks_connect(proxy, self.host, self.port, self.timeout)
-                self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
-        class HTTP(urllib.request.HTTPHandler):
-            def http_open(self, req): return self.do_open(Connection, req)
-        class HTTPS(urllib.request.HTTPSHandler):
-            def https_open(self, req): return self.do_open(SecureConnection, req, context=self._context)
-        return urllib.request.build_opener(urllib.request.ProxyHandler({}), HTTP(), HTTPS())
-    if not proxy.startswith('http://'): raise ValueError('Прокси должен быть http:// или socks5://')
-    return urllib.request.build_opener(urllib.request.ProxyHandler({'http': proxy, 'https': proxy}))
+def build_opener():
+    return urllib.request.build_opener()
 
 
 class Quota:
@@ -116,7 +63,7 @@ class Quota:
                 entries = [e for e in data.get('entries', []) if e['at'] > now-86400]
                 data['entries'] = entries
                 if len(entries) >= rpd or sum(e['tokens'] for e in entries)+tokens > tpd:
-                    raise RuntimeError('Достигнут локальный суточный лимит Groq. Повтор будет доступен после освобождения квоты.')
+                    raise RuntimeError('Достигнут локальный суточный лимит ИИ. Повтор будет доступен после освобождения квоты.')
                 recent = [e for e in entries if e['at'] > now-60]
                 delay = max(0, data.get('blockedUntil',0)-now,
                             (entries[-1]['at']+60/rpm+.1-now) if entries else 0)
@@ -126,14 +73,14 @@ class Quota:
                     ticket = {'at': now, 'tokens': tokens}
                     entries.append(ticket)
                     return now
-            if delay > 300: raise RuntimeError('Квота Groq исчерпана. Повторите позже; автоматическое ожидание больше 5 минут отключено.')
+            if delay > 300: raise RuntimeError('Квота ИИ исчерпана. Повторите позже; автоматическое ожидание больше 5 минут отключено.')
             self.wait(delay)
 
     def wait(self, seconds):
         end = self.clock()+seconds
         while self.clock() < end:
             remaining = end-self.clock()
-            self.status('Жду квоту Groq · '+str(max(1,int(remaining+.999)))+' с')
+            self.status('Жду квоту ИИ · '+str(max(1,int(remaining+.999)))+' с')
             self.sleep(min(remaining, 1))
 
     def update(self, ticket, headers, actual=None, cooldown=0):
@@ -162,25 +109,38 @@ def fit_context(body, tpm, output):
     return body, estimate()
 
 
-def groq_request(body, key, proxy, directory, limits, status=lambda text: None):
-    output = body.get('max_completion_tokens',1024)
-    body, tokens = fit_context(body, limits[2], output)
-    quota = Quota(directory,key,body['model'],limits,status)
-    opener = build_opener(proxy)
-    req = urllib.request.Request('https://api.groq.com/openai/v1/chat/completions',
+def gemini_request(body, key, status=lambda text: None):
+    opener = build_opener()
+    req = urllib.request.Request('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
         data=json.dumps(body,ensure_ascii=False).encode(),
-        headers={'Content-Type':'application/json','User-Agent':'EduCode/0.2 (Groq client)','Authorization':'Bearer '+key})
-    for attempt in range(3):
-        ticket = quota.reserve(tokens)
+        headers={'Content-Type':'application/json','User-Agent':'EduCode/0.3 (Gemini client)','Authorization':'Bearer '+key})
+    attempts = 4
+    for attempt in range(attempts):
         try:
             with opener.open(req,timeout=120) as response:
-                result = json.load(response)
-                quota.update(ticket,response.headers,result.get('usage',{}).get('total_tokens'))
-                return result['choices'][0]['message']
+                return json.load(response)['choices'][0]['message']
         except urllib.error.HTTPError as error:
-            if error.code != 429: raise
-            delay = max(2.1,duration(error.headers.get('retry-after')) or 60)
-            quota.update(ticket,error.headers,cooldown=delay)
-            if attempt == 2: raise RuntimeError('Groq пока ограничивает запросы. Нажмите «Повторить запрос» позже.') from None
-            status('Groq ограничил запросы; ожидаю разрешённое время повторения…')
-    raise RuntimeError('Groq не ответил')
+            retryable = error.code == 429 or 500 <= error.code <= 599
+            raw = b''
+            try: raw = error.read(8192)
+            except (AttributeError, OSError): pass
+            try: detail = json.loads(raw.decode('utf-8','replace')).get('error',{}).get('message','')
+            except (ValueError, AttributeError): detail = ''
+            if not retryable:
+                if error.code == 404:
+                    raise RuntimeError('Gemini не нашёл модель «'+str(body.get('model',''))+'» (HTTP 404). Выберите доступную модель Gemini в настройках.') from None
+                raise RuntimeError('Gemini вернул HTTP '+str(error.code)+': '+(detail[:700] or 'проверьте API-ключ и настройки сервиса.')) from None
+            delay = min(30, max(2.1,duration(error.headers.get('retry-after')) or 2 ** (attempt + 1)))
+            if attempt == attempts-1:
+                reason = 'ограничивает частоту запросов' if error.code == 429 else 'временно перегружен'
+                raise RuntimeError('Gemini '+reason+' (HTTP '+str(error.code)+') после '+str(attempts)+' попыток. Нажмите «Повторить запрос» позже.') from None
+            reason = 'ограничил запросы' if error.code == 429 else 'временно недоступен (HTTP '+str(error.code)+')'
+            status(reason+'; повтор '+str(attempt+2)+'/'+str(attempts)+' через '+str(int(delay+.999))+' с…')
+            time.sleep(delay)
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            if attempt == attempts-1:
+                raise RuntimeError('Нет соединения с Gemini после '+str(attempts)+' попыток. Проверьте VPN и доступ к сети.') from None
+            delay = min(15, 2 ** (attempt + 1))
+            status('Сбой сети Gemini; повтор '+str(attempt+2)+'/'+str(attempts)+' через '+str(delay)+' с…')
+            time.sleep(delay)
+    raise RuntimeError('Gemini не ответил')

@@ -100,6 +100,7 @@ SearchService::SearchService(QObject *parent) : QObject(parent) {
             watcher.removePaths(watcher.directories());
         watcher.addPaths(dirs);
         emit indexChanged();
+        emit scanFinished(projectFiles.size());
         publish();
         findContent();
         if (rescan) {
@@ -122,6 +123,7 @@ SearchService::SearchService(QObject *parent) : QObject(parent) {
                 }
                 publish();
                 findContent();
+                emit libraryIndexFinished(libraries.size(), code == 0);
             });
     registerProvider("project", [this](const QString &q) { return match(projectFiles, q); });
     registerProvider("libraries",
@@ -178,8 +180,13 @@ void SearchService::setProject(const QString &path, const QString &python) {
 }
 void SearchService::loadLibraries() {
     const auto base = QCoreApplication::applicationDirPath();
+    emit libraryIndexStarted();
     modules.start(interpreter, {"-I", base + "/tools/index-python.py",
                                 base + "/node_modules/pyright/dist/typeshed-fallback/stdlib"});
+}
+void SearchService::refreshLibraries() {
+    if (!root.isEmpty())
+        libraryTimer.start(0);
 }
 void SearchService::refresh() {
     if (scanner.isRunning()) {
@@ -188,6 +195,7 @@ void SearchService::refresh() {
     }
     const auto path = root;
     scannedRoot = root;
+    emit scanStarted();
     scanner.setFuture(QtConcurrent::run([path] {
         QVariantList out;
         if (path.isEmpty())
@@ -268,8 +276,9 @@ void SearchService::findContent() {
                 if (path.isEmpty())
                     continue;
                 QString text;
-                if (buffers.contains(path))
-                    text = buffers[path];
+                const auto bufferKey = QDir::fromNativeSeparators(QFileInfo(path).absoluteFilePath());
+                if (buffers.contains(bufferKey))
+                    text = buffers[bufferKey];
                 else {
                     QFile file(path);
                     if (file.size() > 2 * 1024 * 1024 || !file.open(QIODevice::ReadOnly))
