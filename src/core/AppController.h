@@ -52,6 +52,7 @@ class AppController : public QObject {
     Q_PROPERTY(QVariantList backgroundTasks READ backgroundTasks NOTIFY tasksChanged)
     Q_PROPERTY(int overallProgress READ overallProgress NOTIFY tasksChanged)
     Q_PROPERTY(QString taskSummary READ taskSummary NOTIFY tasksChanged)
+    Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)
   public:
     TeacherSession *teacher() { return &teacherSession; }
     qint64 demoProcessId() const { return runner.processId(); }
@@ -74,6 +75,7 @@ class AppController : public QObject {
     QVariantList backgroundTasks() const;
     int overallProgress() const;
     QString taskSummary() const;
+    QString applicationVersion() const;
     QVariantList notifications() const {
         return notificationHistory;
     }
@@ -224,6 +226,7 @@ class AppController : public QObject {
     void editorCommand(const QString &name);
     void panelRequested(int index);
     void consoleOutput(const QString &text);
+    void consoleReset();
     void terminalOutput(const QString &text);
     void lspMessage(const QString &json);
     void languageReady();

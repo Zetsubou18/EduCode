@@ -142,6 +142,8 @@
   "Контекст модели · токены": "Model context · tokens",
   "После лимита старая часть конкретного чата сжимается. Рабочие факты Лиры хранятся отдельно и видны здесь.": "After the limit, older chat content is summarized. Lyra working facts are stored separately and remain visible here.",
   "Выбрать plugin.json": "Choose plugin.json",
+  "Версия": "Version",
+  "Создал Zetsubou": "Created by Zetsubou",
   "Версия 0.2 · 2026\nСоздал Zetsubou": "Version 0.2 · 2026\nCreated by Zetsubou",
   "Простая IDE для изучения Python.": "A simple IDE for learning Python.",
   "Вернутся стандартные значения. Проекты и файлы останутся.": "Defaults will be restored. Projects and files remain.",

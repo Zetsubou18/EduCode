@@ -24,6 +24,12 @@ class CoreTests : public QObject {
         auto keys = config.values["hotkeys"].toMap();
         keys["run"] = "Ctrl+S";
         QVERIFY(!config.set("hotkeys", keys, &error));
+        keys = config.values["hotkeys"].toMap();
+        keys["run"] = "X";
+        QVERIFY(!config.set("hotkeys", keys, &error));
+        auto editorKeys = config.values["editor.hotkeys"].toMap();
+        editorKeys["editor.action.clipboardCutAction"] = "Shift+X";
+        QVERIFY(!config.set("editor.hotkeys", editorKeys, &error));
         QFile file(config.path);
         QVERIFY(file.open(QIODevice::WriteOnly));
         file.write("{ broken");
@@ -45,6 +51,17 @@ class CoreTests : public QObject {
         config.reload();
         QCOMPARE(config.values["ai.geminiModel"].toString(), QString("gemini-3.1-flash-lite"));
         QCOMPARE(config.values["ai.geminiApiKey"].toString(), QString());
+        data = config.values;
+        keys = data["hotkeys"].toMap();
+        keys["run"] = "X";
+        data["hotkeys"] = keys;
+        data["editor.hotkeys"] = QVariantMap{{"editor.action.clipboardCutAction", "X"}};
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QJsonDocument::fromVariant(data).toJson());
+        file.close();
+        config.reload();
+        QCOMPARE(config.values["hotkeys"].toMap()["run"].toString(), QString("F5"));
+        QVERIFY(config.values["editor.hotkeys"].toMap().isEmpty());
     }
     void contentSearchAndUnsavedBuffers() {
         const auto python = qEnvironmentVariable("EDUCODE_TEST_PYTHON");

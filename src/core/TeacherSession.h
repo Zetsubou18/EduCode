@@ -79,6 +79,7 @@ class TeacherSession : public QObject {
     QTimer timer;
     QString role = "idle", status, selected, remotePath, remoteText, frame, lastFrame;
     QString lastHost;
+    qint64 lastCaptureAt = 0;
     bool manualStop = false;
     int lastPort = 0;
     int port = 0, revision = 0, remoteRevision = 0;

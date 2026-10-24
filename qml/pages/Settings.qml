@@ -218,7 +218,7 @@ Rectangle {
       visible: settingsPage.selected==="about"; spacing: 14
       Image { source: appBase+"assets/app_logo.png"; Layout.preferredWidth: 64; Layout.preferredHeight: 64 }
       Text { text: "EduCode"; color: C.Theme.text; font.pixelSize: 28; font.weight: Font.DemiBold }
-      Text { text: backend.translate("Версия 0.2 · 2026\nСоздал Zetsubou",backend.configuration["general.language"]); color: C.Theme.muted; font.pixelSize: 15; lineHeight: 1.6 }
+      Text { text: backend.translate("Версия",backend.configuration["general.language"])+" "+backend.applicationVersion+" · 2026\n"+backend.translate("Создал Zetsubou",backend.configuration["general.language"]); color: C.Theme.muted; font.pixelSize: 15; lineHeight: 1.6 }
       Text { text: backend.translate("Простая IDE для изучения Python.",backend.configuration["general.language"]); color: C.Theme.faint; font.pixelSize: 12 }
      }
      Item { Layout.preferredHeight: 32 }

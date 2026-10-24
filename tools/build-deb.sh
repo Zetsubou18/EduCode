@@ -3,6 +3,8 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 built="$root/out/build/linux-release/EduCode"
 [[ -x "$built/EduCode" && -d "$built/node_modules" ]] || { echo 'Build Linux release first: bash tools/build-linux.sh' >&2; exit 1; }
+version="$(sed -nE 's/^[[:space:]]*project\(EduCode[[:space:]]+VERSION[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+).*$/\1/p' "$root/CMakeLists.txt")"
+[[ -n "$version" ]] || { echo 'Unable to read EduCode version from CMakeLists.txt.' >&2; exit 1; }
 stage="$(mktemp -d)"
 trap 'rm -rf -- "$stage"' EXIT
 app="$stage/opt/educode"
@@ -34,7 +36,7 @@ size="$(du -sk "$app" | cut -f1)"
 arch="$(dpkg --print-architecture)"
 cat > "$stage/DEBIAN/control" <<CONTROL
 Package: educode
-Version: 0.2.0
+Version: $version
 Section: devel
 Priority: optional
 Architecture: $arch
@@ -47,6 +49,6 @@ Description: EduCode Python IDE
  terminal, and optional Python plugins.
 CONTROL
 mkdir -p "$root/out/release"
-package="$root/out/release/educode_0.2.0_${arch}.deb"
+package="$root/out/release/educode_${version}_${arch}.deb"
 dpkg-deb --root-owner-group --build "$stage" "$package"
 echo "$package"

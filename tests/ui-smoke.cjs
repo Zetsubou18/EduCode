@@ -44,8 +44,10 @@ async function main(){
  assert(await editor.eval('pyCharmWidgetStyles.textContent.includes(".py-function-declaration{color:#56a8f5")&&pyCharmWidgetStyles.textContent.includes(".py-builtin{color:#8888c6")&&pyCharmWidgetStyles.textContent.includes(".py-self{color:#94558d")'));
  await editor.eval('editor.getModel().setValue('+JSON.stringify(source)+');updateFStringDecorations();flushChange();true');
  console.log('PASS PyCharm syntax palette decorations');
+ assert.equal(await editor.eval('editor.getModel().getAllDecorations().some(d=>d.options.inlineClassName==="py-named-argument"&&d.range.startLineNumber===6)'),false);console.log('PASS assignment variables keep the normal identifier color');
  const completion=await editor.eval('request("textDocument/completion",{textDocument:{uri:uri(activePath)},position:{line:7,character:10}})');
  assert((completion.items||completion).some(i=>i.label==='math'));console.log('PASS autocomplete');
+ await editor.wait('Array.from(document.querySelectorAll(".codelens-decoration")).some(node=>node.textContent.includes("1 ссыл"))');console.log('PASS CodeLens references refresh after Pyright is ready');
  const hover=await editor.eval('request("textDocument/hover",{textDocument:{uri:uri(activePath)},position:{line:6,character:8}})');assert(hover.contents.value.includes('greet'));console.log('PASS hover/signature');
  const signature=await editor.eval('request("textDocument/signatureHelp",{textDocument:{uri:uri(activePath)},position:{line:6,character:12}})');assert(signature.signatures[0].label.includes('name'));console.log('PASS parameter hints');
  const tabCount=(await editor.eval('host.tabs')).length;
@@ -72,7 +74,7 @@ async function main(){
  let clock=Date.now();const native=spawnSync(path.join(project,linux?'.venv/bin/python':'.venv/Scripts/python.exe'),['-u',floodFile],{windowsHide:true,maxBuffer:12*1024*1024});assert.equal(native.status,0);const nativeTime=Date.now()-clock;
  await editor.eval('host.openFile('+JSON.stringify(floodFile)+');true');await editor.wait('activePath.endsWith("output.py")');clock=Date.now();await editor.eval('host.run();true');await consolePage.wait(textBuffer+'.includes("FLOOD_DONE")');const uiTime=Date.now()-clock;
  console.log('PASS 100000 lines through live console: native '+nativeTime+' ms; IDE display '+uiTime+' ms');assert(uiTime<nativeTime*3+1000);
- await editor.eval('host.openFile('+JSON.stringify(path.join(project,'second.py'))+');true');await editor.wait('activePath.endsWith("second.py")');await editor.eval('editor.getModel().setValue("import time\\nprint(\'RUNNING\',flush=True)\\ntime.sleep(60)\\n");host.run();true');await consolePage.wait('host.running');await consolePage.eval('host.stop();true');await consolePage.wait('!host.running');console.log('PASS stop running process');
+ await editor.eval('host.openFile('+JSON.stringify(path.join(project,'second.py'))+');true');await editor.wait('activePath.endsWith("second.py")');await editor.eval('editor.getModel().setValue("import time\\nprint(\'RUNNING\',flush=True)\\ntime.sleep(60)\\n");host.run();true');await consolePage.wait('host.running');await consolePage.wait(textBuffer+'.includes("RUNNING")');assert(!(await consolePage.eval(textBuffer)).includes('FLOOD_DONE'));await consolePage.eval('host.stop();true');await consolePage.wait('!host.running');console.log('PASS console reset and stop running process');
  await editor.eval('editor.getModel().setValue("value = 42\\n");host.saveAll();host.openFile('+JSON.stringify(file)+');true');await editor.wait('activePath.endsWith("main.py")');await editor.eval('host.run();true');await consolePage.wait('host.running');await consolePage.eval('host.consoleInput("Тест\\n");true');await consolePage.wait('!host.running');
  // Force a genuine suggestion popup near the bottom edge and assert it misses the caret line.
  const popupText=source+'\n'.repeat(14)+'math.';

@@ -89,6 +89,10 @@ void TeacherSession::send(QTcpSocket *s, const QJsonObject &m) {
         Log::write("TEACHER", "Message rejected: payload exceeds limit");
         return;
     }
+    // Screen frames are replaceable. Dropping a stale frame under backpressure keeps code,
+    // edits and pings responsive instead of disconnecting a student on a slow network.
+    if (m["type"].toString() == "frame" && s->bytesToWrite() > 512 * 1024)
+        return;
     if (s->bytesToWrite() > 4 * 1024 * 1024) {
         Log::write("TEACHER", "Peer disconnected: outgoing queue exceeded 4 MiB");
         s->abort();
@@ -240,6 +244,7 @@ void TeacherSession::stop() {
     remoteText.clear();
     frame.clear();
     lastFrame.clear();
+    lastCaptureAt = 0;
     last = {};
     emit changed();
     emit remoteChanged();
@@ -404,7 +409,16 @@ void TeacherSession::tick() {
         }
     }
     publish();
-    if (role == "teacher" && !peers.isEmpty() && capture) {
+    if (role == "teacher" && !peers.isEmpty() && capture && time - lastCaptureAt >= 500) {
+        lastCaptureAt = time;
+        bool canSendFrame = false;
+        for (auto s : peers.keys())
+            if (peers[s].welcomed && s->bytesToWrite() <= 512 * 1024) {
+                canSendFrame = true;
+                break;
+            }
+        if (!canSendFrame)
+            return;
         auto data = capture();
         if (!data.isEmpty() && data != lastFrame) {
             lastFrame = data;

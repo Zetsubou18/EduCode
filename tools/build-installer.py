@@ -4,8 +4,14 @@ import shutil
 import struct
 import sys
 import zipfile
+import re
 
 root = Path(sys.argv[1])
+cmake = (root / 'CMakeLists.txt').read_text(encoding='utf-8')
+version_match = re.search(r'project\(EduCode\s+VERSION\s+([0-9]+(?:\.[0-9]+)+)', cmake)
+if not version_match:
+    raise RuntimeError('EduCode version was not found in CMakeLists.txt')
+version = version_match.group(1)
 build = root / 'out/build/educode-qt5-release/EduCode'
 runtime = root / 'out/installer/runtime'
 release = root / 'out/release'
@@ -44,6 +50,6 @@ with zipfile.ZipFile(bundle_zip, 'w', zipfile.ZIP_DEFLATED, compresslevel=6, all
         if source.is_file() and source.name != 'vc_redist.x64.exe':
             method = zipfile.ZIP_STORED if source == payload_zip else zipfile.ZIP_DEFLATED
             result.write(source, source.relative_to(runtime).as_posix(), compress_type=method)
-target = release / 'EduCodeSetup-0.3.0-win64.exe'
+target = release / f'EduCodeSetup-{version}-win64.exe'
 bootstrap(target, bundle_zip)
 print(f'{target} ({target.stat().st_size / 1024 / 1024:.1f} MiB)')

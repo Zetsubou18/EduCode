@@ -23,6 +23,10 @@ function pythonDefinitions(model){
 }
 function argumentOffsets(text,start){let depth=0,quote='',escaped=false,result=[start];for(let i=start;i<text.length;i++){const c=text[i];if(quote){if(escaped)escaped=false;else if(c==='\\')escaped=true;else if(c===quote)quote='';continue;}if(c==='"'||c==="'"){quote=c;continue;}if(c==='('||c==='['||c==='{')depth++;else if(c===')'||c===']'||c==='}'){if(depth===0)break;depth--;}else if(c===','&&depth===0)result.push(i+1);}return result;}
 let referenceSelection=0,referenceItems=[];
+const codeLensListeners=new Set();
+let codeLensRetryTimer=0;
+function codeLensChanged(listener){codeLensListeners.add(listener);return {dispose:()=>codeLensListeners.delete(listener)};}
+function refreshCodeLenses(){for(const listener of [...codeLensListeners])listener();}
 const pyCharmWidgetStyles=document.createElement('style');
 pyCharmWidgetStyles.textContent=`
 .monaco-editor .suggest-widget,.monaco-editor .monaco-hover{border-radius:8px!important;box-shadow:0 10px 28px #0008!important;border-color:#43454a!important}
@@ -79,7 +83,10 @@ function updateFStringDecorations(){
   pushMatches(next,line,masked,/\b__[A-Za-z_]\w*__\b/g,'py-special-name');
   pushMatches(next,line,masked,/\b[A-Za-z_]\w*\b/g,'py-builtin');
   for(let i=next.length-1;i>=0;i--){const item=next[i],value=model.getValueInRange(item.range);if(item.options.inlineClassName==='py-builtin'&&!pythonBuiltins.has(value))next.splice(i,1);}
-  if(!/^\s*(?:async\s+)?def\b/.test(masked)&&masked.includes('('))pushMatches(next,line,masked,/\b([A-Za-z_]\w*)\s*(?==)/g,'py-named-argument',1);
+   // Named arguments are only identifiers directly after "(" or ",". The old broad
+   // expression also matched the left side of `name = input(...)` and painted normal
+   // variables orange.
+   if(!/^\s*(?:async\s+)?def\b/.test(masked)&&masked.includes('('))pushMatches(next,line,masked,/(?:[(,]\s*)([A-Za-z_]\w*)\s*(?==)/g,'py-named-argument',1);
   pushMatches(next,line,text,/\bb(?:r|R)?(["'])(?:\\.|.)*?\1/g,'py-binary-string');
  }
  fstringDecorations=editor.deltaDecorations(fstringDecorations,next);
@@ -148,8 +155,12 @@ require(['vs/editor/editor.main'],()=>{
    }
    return {hints,dispose(){}};
  }});
- monaco.languages.registerCodeLensProvider('python',{provideCodeLenses:async(model,token)=>{
-   const entries=[...pythonDefinitions(model)];const lenses=await Promise.all(entries.map(async([name,def])=>{const r=await request('textDocument/references',{textDocument:{uri:model.uri.toString()},position:{line:def.line-1,character:def.column-1},context:{includeDeclaration:false}},token);const refs=(Array.isArray(r)?r:[]).map(x=>({uri:x.uri,range:range(x.range)}));return {range:new monaco.Range(def.line,def.column,def.line,def.column+name.length),command:{id:'educode.showReferences',title:refs.length+' '+referenceLabel(refs.length),arguments:[{name,kind:'Function',position:{lineNumber:def.line,column:def.column},references:refs}]}};}));return {lenses:token.isCancellationRequested?[]:lenses,dispose(){}};
+ monaco.languages.registerCodeLensProvider('python',{onDidChange:codeLensChanged,provideCodeLenses:async(model,token)=>{
+   if(!serverReady)return {lenses:[],dispose(){}};
+   const entries=[...pythonDefinitions(model)],results=await Promise.all(entries.map(async([name,def])=>{const r=await request('textDocument/references',{textDocument:{uri:model.uri.toString()},position:{line:def.line-1,character:def.column-1},context:{includeDeclaration:false}},token);if(r===null)return null;const refs=(Array.isArray(r)?r:[]).map(x=>({uri:x.uri,range:range(x.range)}));return {range:new monaco.Range(def.line,def.column,def.line,def.column+name.length),command:{id:'educode.showReferences',title:refs.length+' '+referenceLabel(refs.length),arguments:[{name,kind:'Function',position:{lineNumber:def.line,column:def.column},references:refs}]}};}));
+   if(token.isCancellationRequested||model.isDisposed())return {lenses:[],dispose(){}};
+   if(results.some(result=>result===null)){clearTimeout(codeLensRetryTimer);codeLensRetryTimer=setTimeout(refreshCodeLenses,1000);}
+   return {lenses:results.filter(Boolean),dispose(){}};
  }});
  monaco.editor.registerCommand('educode.showReferences',(_accessor,payload)=>showReferences(payload));
  monaco.languages.registerHoverProvider('python',{provideHover:(model,p)=>{const word=model.getWordAtPosition(p);if(!word)return null;for(let line=1;line<=model.getLineCount();line++){const m=model.getLineContent(line).match(new RegExp('^\\s*'+word.word+'\\s*=\\s*\\[([^\\]]*)\\]'));if(!m)continue;const types=new Set(m[1].split(',').map(v=>v.trim()).filter(Boolean).map(v=>/^[rubf]*[\"']/.test(v)?'str':/^(True|False)$/.test(v)?'bool':/^-?\d+(?:\.\d+)?$/.test(v)?(v.includes('.')?'float':'int'):'Unknown'));if(types.size)return {contents:[{value:'`'+word.word+': list['+[...types].join(' | ')+']` *(EduCode inference)*'}]};}return null;}});
@@ -158,7 +169,7 @@ require(['vs/editor/editor.main'],()=>{
   host=channel.objects.backend;
   host.sourceActivated.connect(activate);
   host.documentClosed.connect(path=>{if(activePath===path){flushChange();activePath='';editor.setModel(null);}if(splitPath===path)toggleSplit();if(openedLsp.delete(path))send('textDocument/didClose',{textDocument:{uri:uri(path)}});const m=models.get(path);if(m)m.dispose();models.delete(path);versions.delete(path);diagnostics.delete(uri(path));updateToolbar();});
-  host.languageReady.connect(()=>{serverReady=true;openedLsp.clear();versions.clear();for(const path of models.keys())openLsp(path);});
+  host.languageReady.connect(()=>{serverReady=true;openedLsp.clear();versions.clear();for(const path of models.keys())openLsp(path);setTimeout(refreshCodeLenses,50);});
   host.lspMessage.connect(json=>{const obj=JSON.parse(json);if(obj.id!==undefined){const req=requests.get(obj.id);if(req){clearTimeout(req.timer);requests.delete(obj.id);req.resolve(obj.result||null);}}else if(obj.method==='textDocument/publishDiagnostics'){const {uri:u,diagnostics:ds,version}=obj.params;const model=Array.from(models.values()).find(m=>m.uri.toString()===u);if(!model||!isPython(model.uri.fsPath))return;if(version!==undefined&&version<model.getVersionId())return;diagnostics.set(u,ds);monaco.editor.setModelMarkers(model,'pyright',ds.map(d=>({...range(d.range),message:d.message,severity:d.severity===1?monaco.MarkerSeverity.Error:d.severity===2?monaco.MarkerSeverity.Warning:monaco.MarkerSeverity.Info,source:d.source||'Pyright'})));if(u===uri(activePath))reportProblems();}});
   host.editorCommand.connect(name=>{if(name==='split'){toggleSplit();return;}const actions={find:'actions.find',replace:'editor.action.startFindReplaceAction',palette:'editor.action.quickCommand'};if(actions[name])editor.getAction(actions[name]).run();});
   document.getElementById('codeButton').onclick=()=>showPreview(false);

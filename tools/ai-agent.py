@@ -31,7 +31,7 @@ def ide(method, params=None):
 def web_search(query):
     emit('status', text='Ищу в интернете…')
     url = 'https://html.duckduckgo.com/html/?q=' + urllib.parse.quote(query)
-    req = urllib.request.Request(url, headers={'User-Agent':'Mozilla/5.0 EduCode/0.1'})
+    req = urllib.request.Request(url, headers={'User-Agent':'Mozilla/5.0 EduCode/'+os.environ.get('EDUCODE_VERSION','dev')})
     text = build_opener().open(req, timeout=15).read().decode('utf-8','replace')
     found=[]
     for link,title in re.findall(r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', text):
@@ -50,7 +50,7 @@ def web_fetch(url):
         if address.is_private or address.is_loopback or address.is_link_local or address.is_reserved:
             raise RuntimeError('Локальные и служебные адреса недоступны веб-инструменту.')
     emit('status', text='Читаю страницу…')
-    req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0 EduCode/0.1'})
+    req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0 EduCode/'+os.environ.get('EDUCODE_VERSION','dev')})
     raw=build_opener().open(req,timeout=15).read(600000).decode('utf-8','replace')
     raw=re.sub(r'(?is)<(script|style).*?>.*?</\1>',' ',raw)
     return re.sub(r'\s+',' ',re.sub(r'<[^>]+>',' ',html.unescape(raw)))[:18000]

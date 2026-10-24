@@ -10,6 +10,26 @@
 #include <QSet>
 #include <QStandardPaths>
 #include <QUrl>
+namespace {
+bool isSafeShortcut(const QString &sequence, bool allowChord = false) {
+    if (sequence.isEmpty())
+        return true;
+    const QKeySequence key(sequence, QKeySequence::PortableText);
+    if (key.isEmpty() || key.count() > (allowChord ? 2 : 1))
+        return false;
+    for (int i = 0; i < key.count(); ++i) {
+        const int chord = key[i];
+        const int code = chord & ~Qt::KeyboardModifierMask;
+        const auto modifiers = chord & Qt::KeyboardModifierMask;
+        const bool functionKey = code >= Qt::Key_F1 && code <= Qt::Key_F35;
+        // A plain letter (including Shift+letter) is text input, not an application shortcut.
+        // Registering it as an ApplicationShortcut makes that physical key disappear in Monaco.
+        if (code == Qt::Key_unknown || (!functionKey && !(modifiers & (Qt::CTRL | Qt::ALT | Qt::META))))
+            return false;
+    }
+    return true;
+}
+}
 QVariantMap Configuration::defaults() {
     return {{"schemaVersion", 1},
             {"general.saveBeforeRun", true},
@@ -127,7 +147,7 @@ bool Configuration::validate(const QVariantMap &candidate, QString *error) const
         const auto sequence = it.value().toString();
         if (!sequence.isEmpty()) {
             QKeySequence key(sequence, QKeySequence::PortableText);
-            if (key.isEmpty() || key.count() != 1 || (key[0] & ~Qt::KeyboardModifierMask) == Qt::Key_unknown)
+            if (!isSafeShortcut(sequence))
                 return fail("Некорректная комбинация: " + sequence);
             auto normalized = key.toString(QKeySequence::PortableText);
             if (seen.contains(normalized))
@@ -139,10 +159,7 @@ bool Configuration::validate(const QVariantMap &candidate, QString *error) const
         return fail("В конфигурации должны быть все основные команды.");
     const auto overrides = candidate["editor.hotkeys"].toMap();
     for (auto it = overrides.begin(); it != overrides.end(); ++it) {
-        QKeySequence key(it.value().toString(), QKeySequence::PortableText);
-        if (!it.value().toString().isEmpty() &&
-            (key.isEmpty() || key.count() > 2 || (key[0] & ~Qt::KeyboardModifierMask) == Qt::Key_unknown ||
-             (key.count() == 2 && (key[1] & ~Qt::KeyboardModifierMask) == Qt::Key_unknown)))
+        if (!isSafeShortcut(it.value().toString(), true))
             return fail("Некорректная комбинация редактора.");
     }
     if (candidate["general.projectsDirectory"].toString().trimmed().isEmpty())
@@ -225,11 +242,20 @@ void Configuration::reload() {
     auto bindings = Commands::defaultBindings();
     const auto storedBindings = candidate["hotkeys"].toMap();
     for (auto it = storedBindings.begin(); it != storedBindings.end(); ++it)
-        bindings[it.key()] = it.value();
+        if (isSafeShortcut(it.value().toString()))
+            bindings[it.key()] = it.value();
     if (bindings.value("palette").toString() == "F1") {
         bindings["palette"] = "Ctrl+Shift+P";
     }
     candidate["hotkeys"] = bindings;
+    auto editorBindings = candidate["editor.hotkeys"].toMap();
+    for (auto it = editorBindings.begin(); it != editorBindings.end();) {
+        if (!isSafeShortcut(it.value().toString(), true))
+            it = editorBindings.erase(it);
+        else
+            ++it;
+    }
+    candidate["editor.hotkeys"] = editorBindings;
     if (!validate(candidate, &error)) {
         emit rejected(error);
         return;

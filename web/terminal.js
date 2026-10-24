@@ -8,7 +8,7 @@ new QWebChannel(qt.webChannelTransport,c=>{
  host=c.objects.backend;
  function applySettings(){term.options.fontSize=host.configuration["terminal.fontSize"];term.options.scrollback=host.configuration["terminal.scrollback"];fit.fit();if(!consoleMode)host.terminalResize(term.cols,term.rows);}
  host.configurationChanged.connect(applySettings);applySettings();
- if(consoleMode){host.consoleOutput.connect(output);term.onData(data=>{if(!host.running)return;for(const char of data.replace(/\r\n/g,'\r')){if(char==='\r'||char==='\n'){host.consoleInput(buffer+'\n');term.write('\r\n');buffer='';}else if(char==='\x7f'){if(buffer.length){buffer=buffer.slice(0,-1);term.write('\b \b');}}else if(char==='\x03'){host.stop();buffer='';}else if(char>=' '){buffer+=char;term.write(char);}}});host.stateChanged.connect(()=>{if(!host.running)buffer='';});}
+ if(consoleMode){host.consoleOutput.connect(output);host.consoleReset.connect(()=>{queued='';backlog=0;buffer='';term.reset();});term.onData(data=>{if(!host.running)return;for(const char of data.replace(/\r\n/g,'\r')){if(char==='\r'||char==='\n'){host.consoleInput(buffer+'\n');term.write('\r\n');buffer='';}else if(char==='\x7f'){if(buffer.length){buffer=buffer.slice(0,-1);term.write('\b \b');}}else if(char==='\x03'){host.stop();buffer='';}else if(char>=' '){buffer+=char;term.write(char);}}});host.stateChanged.connect(()=>{if(!host.running)buffer='';});}
  else {host.terminalOutput.connect(output);term.onData(s=>host.terminalInput(s));host.startTerminal();host.terminalResize(term.cols,term.rows);}
 });
 new ResizeObserver(()=>{fit.fit();if(host&&!consoleMode)host.terminalResize(term.cols,term.rows);}).observe(document.getElementById('terminal'));

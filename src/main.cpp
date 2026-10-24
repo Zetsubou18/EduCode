@@ -1,5 +1,6 @@
 #include "core/AppController.h"
 #include "core/Log.h"
+#include "Version.h"
 #include "platform/WindowChrome.h"
 #include "platform/DemoCapture.h"
 #include <QBuffer>
@@ -38,7 +39,7 @@ int main(int argc, char **argv) {
             return 0;
         }
         if (options && (arg == "--version" || arg == "-v")) {
-            QTextStream(stdout) << "EduCode 0.3.0\n"; return 0;
+            QTextStream(stdout) << "EduCode " EDUCODE_VERSION "\n"; return 0;
         }
         if (options && arg == "--verbose") { qputenv("EDUCODE_VERBOSE", "1"); continue; }
         if (options && arg == "--wait") continue;
@@ -84,7 +85,8 @@ int main(int argc, char **argv) {
     app.setQuitOnLastWindowClosed(false);
     app.setOrganizationName(qEnvironmentVariableIsSet("EDUCODE_TEST_MODE") ? "EduCodeTests" : "EduCode");
     app.setApplicationName("EduCode");
-    app.setApplicationVersion("0.3.0");
+    app.setApplicationVersion(EDUCODE_VERSION);
+    qputenv("EDUCODE_VERSION", app.applicationVersion().toUtf8());
     Log::initialize();
     const QString base = QCoreApplication::applicationDirPath();
     app.setWindowIcon(QIcon(base + "/assets/app_logo.png"));

@@ -279,12 +279,16 @@ AppController::AppController(QObject *p)
     connect(&python, &PythonEnvironment::error, this, [this](const QString &text) { finishTask("python-env", QStringLiteral("Ошибка")); emit error(text); });
     connect(&runner, &ProcessRunner::output, this, [this](const QString &text) {
         consoleBuffer += text;
-        if (consoleBuffer.size() > 100000)
-            consoleBuffer = consoleBuffer.right(100000);
+        if (consoleBuffer.size() > 32768)
+            consoleBuffer = consoleBuffer.right(32768);
+        const bool hadError = hasConsoleError;
         if (text.contains("Traceback") || text.contains(QRegularExpression("[A-Za-z_]*(Error|Exception):")))
             hasConsoleError = true;
         emit consoleOutput(text);
-        emit stateChanged();
+        // Console output can arrive dozens of times per second. Re-evaluating the entire QML
+        // interface for every chunk caused visible stalls on slower PCs.
+        if (hasConsoleError != hadError)
+            emit stateChanged();
     });
     connect(&runner, &ProcessRunner::runningChanged, this, [this] {
         Log::write("RUN", runner.running() ? "Process starting/running" : "Process finished");
@@ -292,8 +296,8 @@ AppController::AppController(QObject *p)
     });
     connect(&terminal, &TerminalSession::output, this, [this](const QString &text) {
         terminalBuffer += text;
-        if (terminalBuffer.size() > 100000)
-            terminalBuffer = terminalBuffer.right(100000);
+        if (terminalBuffer.size() > 32768)
+            terminalBuffer = terminalBuffer.right(32768);
         emit terminalOutput(text);
     });
     connect(&terminal, &TerminalSession::error, this, &AppController::error);
@@ -743,7 +747,10 @@ void AppController::run() {
         return;
     }
     Log::write("RUN", QString("Start %1 (%2)").arg(p, config.values["console.output"].toString()));
+    consoleBuffer.clear();
     hasConsoleError = false;
+    emit consoleReset();
+    emit stateChanged();
     runner.run(pythonPath(), p, project, config.values["console.output"].toString() == "system");
 }
 void AppController::startTerminal() {
@@ -950,6 +957,9 @@ QString AppController::clipboardText() const {
 
 QString AppController::logPath() const {
     return Log::path();
+}
+QString AppController::applicationVersion() const {
+    return QCoreApplication::applicationVersion();
 }
 bool AppController::setSetting(const QString &key, const QVariant &value) {
     Log::write("CONFIG", "Set " + key);

@@ -59,7 +59,7 @@ try:
         if exact:
             emit([exact]); sys.exit(0)
         if not os.path.exists(cache):
-            req = urllib.request.Request('https://pypi.org/simple/', headers={'Accept':'application/vnd.pypi.simple.v1+json','User-Agent':'EduCode/0.1'})
+            req = urllib.request.Request('https://pypi.org/simple/', headers={'Accept':'application/vnd.pypi.simple.v1+json','User-Agent':'EduCode/'+os.environ.get('EDUCODE_VERSION','dev')})
             with urllib.request.urlopen(req, timeout=45) as response:
                 payload = json.load(response)
             names = [item['name'] for item in payload.get('projects', [])]

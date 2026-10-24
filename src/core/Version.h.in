@@ -1,0 +1,5 @@
+#pragma once
+
+// CMakeLists.txt project(... VERSION ...) is the single source of truth.
+#define EDUCODE_VERSION "@PROJECT_VERSION@"
+

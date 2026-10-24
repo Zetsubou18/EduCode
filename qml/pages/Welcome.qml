@@ -28,7 +28,7 @@ Item {
    }
    C.ActionButton { Layout.alignment: Qt.AlignHCenter; text: backend.translate("Открыть папку проекта",backend.configuration["general.language"]); glyph: "folder"; subtle: true; ink: C.Theme.muted; onClicked: page.openRequested() }
    Item { Layout.preferredHeight: 0 }
-   Text { Layout.alignment: Qt.AlignHCenter; text: "PYTHON IDE  /  0.1"; color: C.Theme.faint; font.pixelSize: 10; font.letterSpacing: 2 }
+   Text { Layout.alignment: Qt.AlignHCenter; text: "PYTHON IDE  /  "+backend.applicationVersion; color: C.Theme.faint; font.pixelSize: 10; font.letterSpacing: 2 }
   }
   Rectangle {
    Layout.fillWidth: true
